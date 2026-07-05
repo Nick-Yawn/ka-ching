@@ -1,5 +1,7 @@
 # Ka-Ching!
 
+![Ice Barraging cows in Lumbridge at 1,548 gp a cast](demo.gif)
+
 Every spell you cast and every arrow you break is money leaving your bank. This plugin
 makes sure you *feel* it: a gold number floats up over your head with the GE price of
 what you just vaporized, and the Grand Exchange coin jingle plays.

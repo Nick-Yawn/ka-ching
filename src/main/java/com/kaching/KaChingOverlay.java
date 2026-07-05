@@ -34,11 +34,15 @@ public class KaChingOverlay extends Overlay
 	private static class Drop
 	{
 		final String text;
+		// Captured at spawn: getLogicalHeight() tracks the current animation
+		// pose, so reading it live makes the text bob with attack animations
+		final int zOffset;
 		final long startMs = System.currentTimeMillis();
 
-		Drop(String text)
+		Drop(String text, int zOffset)
 		{
 			this.text = text;
+			this.zOffset = zOffset;
 		}
 	}
 
@@ -52,9 +56,11 @@ public class KaChingOverlay extends Overlay
 
 	void add(long value)
 	{
+		Player player = client.getLocalPlayer();
+		int zOffset = (player != null ? player.getLogicalHeight() : 220) + 40;
 		synchronized (drops)
 		{
-			drops.add(new Drop("-" + QuantityFormatter.formatNumber(value) + " gp"));
+			drops.add(new Drop("-" + QuantityFormatter.formatNumber(value) + " gp", zOffset));
 		}
 	}
 
@@ -94,7 +100,7 @@ public class KaChingOverlay extends Overlay
 
 				Point base = Perspective.getCanvasTextLocation(
 					client, graphics, player.getLocalLocation(), drop.text,
-					player.getLogicalHeight() + 40);
+					drop.zOffset);
 				if (base == null)
 				{
 					continue;
