@@ -29,6 +29,7 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.ItemQuantityChanged;
 import net.runelite.api.events.ItemSpawned;
+import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
@@ -63,6 +64,11 @@ public class KaChingPlugin extends Plugin
 	// weapon recipe are recharges even when the chat message isn't recognized —
 	// no spell consumes five charges' worth of a recipe in one tick.
 	private static final int MIN_RECHARGE_CHARGES = 5;
+	// An Eat/Drink click should consume its item within this many ticks
+	private static final int CONSUME_GRACE_TICKS = 2;
+
+	// "Prayer potion(3)" -> a sip costs a third of the (3) price
+	private static final Pattern DOSE_SUFFIX = Pattern.compile("\\((\\d)\\)$");
 
 	private static final Set<Integer> RUNE_IDS = Set.of(
 		ItemID.AIRRUNE, ItemID.WATERRUNE, ItemID.EARTHRUNE, ItemID.FIRERUNE,
@@ -159,6 +165,8 @@ public class KaChingPlugin extends Plugin
 	private Map<Integer, Integer> prevPouch = new HashMap<>();
 	private final Map<Integer, Integer> groundThisTick = new HashMap<>();
 	private final List<PendingAmmo> pendingAmmo = new ArrayList<>();
+	private final List<PendingConsume> pendingConsumes = new ArrayList<>();
+	private final Map<Integer, Integer> doseCache = new HashMap<>();
 	private final int[] prevSlotIds = {-1, -1};
 	private final int[] prevSlotQtys = {0, 0};
 	private boolean synced;
@@ -185,6 +193,18 @@ public class KaChingPlugin extends Plugin
 		{
 			this.itemId = itemId;
 			this.quantity = quantity;
+			this.expiryTick = expiryTick;
+		}
+	}
+
+	private static class PendingConsume
+	{
+		final int itemId;
+		final int expiryTick;
+
+		PendingConsume(int itemId, int expiryTick)
+		{
+			this.itemId = itemId;
 			this.expiryTick = expiryTick;
 		}
 	}
@@ -230,6 +250,7 @@ public class KaChingPlugin extends Plugin
 		suppressRunesUntilTick = -1;
 		prevCannonAmmo = -1;
 		dealtDamageThisTick = false;
+		pendingConsumes.clear();
 	}
 
 	@Subscribe
@@ -316,6 +337,20 @@ public class KaChingPlugin extends Plugin
 	}
 
 	@Subscribe
+	public void onMenuOptionClicked(MenuOptionClicked event)
+	{
+		if (!config.trackConsumables() || !event.isItemOp())
+		{
+			return;
+		}
+		String option = event.getMenuOption();
+		if ("Eat".equals(option) || "Drink".equals(option))
+		{
+			pendingConsumes.add(new PendingConsume(event.getItemId(), client.getTickCount() + CONSUME_GRACE_TICKS));
+		}
+	}
+
+	@Subscribe
 	public void onItemSpawned(ItemSpawned event)
 	{
 		recordGroundSpawn(event.getItem(), event.getItem().getQuantity());
@@ -387,6 +422,7 @@ public class KaChingPlugin extends Plugin
 		}
 
 		value += cannonValue(curInv);
+		value += consumablesValue(curInv);
 
 		if (value >= Math.max(1, config.minValue()))
 		{
@@ -709,6 +745,49 @@ public class KaChingPlugin extends Plugin
 		}
 		int shots = delta - forgiven;
 		return shots > 0 ? (long) shots * priceOf(cannonBallItemId) : 0;
+	}
+
+	/**
+	 * Food and potions, gated on an explicit Eat/Drink click so that dropping or
+	 * depositing them can never bill — the click marks intent, the inventory
+	 * decrease confirms it. Potions are pro-rated by the dose count in their
+	 * name: a sip from a "(3)" costs a third of the (3)'s GE price, which is
+	 * self-consistently the per-dose market rate.
+	 */
+	private long consumablesValue(Map<Integer, Integer> curInv)
+	{
+		if (pendingConsumes.isEmpty())
+		{
+			return 0;
+		}
+		long value = 0;
+		Map<Integer, Integer> billed = new HashMap<>();
+		for (Iterator<PendingConsume> it = pendingConsumes.iterator(); it.hasNext(); )
+		{
+			PendingConsume pending = it.next();
+			int decrease = prevInv.getOrDefault(pending.itemId, 0) - curInv.getOrDefault(pending.itemId, 0);
+			int alreadyBilled = billed.getOrDefault(pending.itemId, 0);
+			if (decrease > alreadyBilled)
+			{
+				billed.put(pending.itemId, alreadyBilled + 1);
+				value += Math.round((double) itemManager.getItemPrice(pending.itemId) / doses(pending.itemId));
+				it.remove();
+			}
+			else if (client.getTickCount() >= pending.expiryTick)
+			{
+				it.remove(); // clicked but nothing was consumed
+			}
+		}
+		return value;
+	}
+
+	private int doses(int itemId)
+	{
+		return doseCache.computeIfAbsent(itemId, id ->
+		{
+			Matcher matcher = DOSE_SUFFIX.matcher(itemManager.getItemComposition(id).getName());
+			return matcher.find() ? Math.max(1, Integer.parseInt(matcher.group(1))) : 1;
+		});
 	}
 
 	private int priceOf(int itemId)

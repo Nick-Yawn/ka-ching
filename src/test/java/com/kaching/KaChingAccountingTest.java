@@ -12,7 +12,9 @@ import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.GameState;
 import net.runelite.api.Hitsplat;
 import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
 import net.runelite.api.TileItem;
 import net.runelite.api.events.AnimationChanged;
@@ -20,6 +22,7 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.ItemSpawned;
+import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
@@ -53,6 +56,8 @@ public class KaChingAccountingTest
 	private static final int AMMO_SLOT = EquipmentInventorySlot.AMMO.getSlotIdx();
 	private static final int WEAPON_SLOT = EquipmentInventorySlot.WEAPON.getSlotIdx();
 	private static final int ARROW = 892; // rune arrow
+	private static final int SHARK = 385;
+	private static final int PRAYER_POTION_3 = 139;
 
 	private static final int DEATH_PRICE = 200;
 	private static final int CHAOS_PRICE = 80;
@@ -115,6 +120,7 @@ public class KaChingAccountingTest
 		when(config.trackAmmo()).thenReturn(true);
 		when(config.trackChargedWeapons()).thenReturn(true);
 		when(config.trackCannon()).thenReturn(true);
+		when(config.trackConsumables()).thenReturn(true);
 		when(config.playSound()).thenReturn(false);
 		when(config.minValue()).thenReturn(1);
 		when(config.avasDevice()).thenReturn(KaChingConfig.AvasDevice.AUTO_DETECT);
@@ -350,6 +356,60 @@ public class KaChingAccountingTest
 		verify(overlay, times(1)).add(Math.round(SCALE_PRICE * (2.0 / 3)));
 	}
 
+	// ---- food & potions ----
+
+	@Test
+	public void eatingFoodIsBilled()
+	{
+		nameOf(SHARK, "Shark");
+		price(SHARK, 800);
+		setInventory(new Item(SHARK, 5));
+		tick();
+		clickConsume("Eat", SHARK);
+		setInventory(new Item(SHARK, 4));
+		tick();
+		verify(overlay).add(800L);
+	}
+
+	@Test
+	public void droppingFoodWithoutEatingIsSilent()
+	{
+		nameOf(SHARK, "Shark");
+		price(SHARK, 800);
+		setInventory(new Item(SHARK, 5));
+		tick();
+		setInventory(new Item(SHARK, 4)); // no Eat click — dropped/destroyed
+		tick();
+		verify(overlay, never()).add(anyLong());
+	}
+
+	@Test
+	public void potionSipsAreProRated()
+	{
+		nameOf(PRAYER_POTION_3, "Prayer potion(3)");
+		price(PRAYER_POTION_3, 9_000);
+		setInventory(new Item(PRAYER_POTION_3, 1));
+		tick();
+		clickConsume("Drink", PRAYER_POTION_3);
+		setInventory(); // the (3) became a (2)
+		tick();
+		verify(overlay).add(3_000L);
+	}
+
+	@Test
+	public void expiredConsumeClickDoesNotBillLaterDecrease()
+	{
+		nameOf(SHARK, "Shark");
+		price(SHARK, 800);
+		setInventory(new Item(SHARK, 5));
+		tick();
+		clickConsume("Eat", SHARK);
+		ticks(3); // click expires unconsumed
+		setInventory(new Item(SHARK, 4)); // later decrease (e.g. dropped)
+		tick();
+		verify(overlay, never()).add(anyLong());
+	}
+
 	// ---- harness ----
 
 	private void inject(String field, Object value) throws Exception
@@ -413,6 +473,22 @@ public class KaChingAccountingTest
 		AnimationChanged event = new AnimationChanged();
 		event.setActor(localPlayer);
 		plugin.onAnimationChanged(event);
+	}
+
+	private void nameOf(int itemId, String name)
+	{
+		ItemComposition composition = mock(ItemComposition.class);
+		when(composition.getName()).thenReturn(name);
+		when(itemManager.getItemComposition(itemId)).thenReturn(composition);
+	}
+
+	private void clickConsume(String option, int itemId)
+	{
+		MenuEntry entry = mock(MenuEntry.class);
+		when(entry.isItemOp()).thenReturn(true);
+		when(entry.getOption()).thenReturn(option);
+		when(entry.getItemId()).thenReturn(itemId);
+		plugin.onMenuOptionClicked(new MenuOptionClicked(entry));
 	}
 
 	private void hitsplatOnEnemy(int amount)

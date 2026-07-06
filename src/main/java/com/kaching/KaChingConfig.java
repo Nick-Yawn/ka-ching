@@ -55,10 +55,21 @@ public interface KaChingConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "trackConsumables",
+		name = "Track food & potions",
+		description = "Show the GE price of food you eat and potion doses you drink (pro-rated per dose)",
+		position = 4
+	)
+	default boolean trackConsumables()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "avasDevice",
 		name = "Ava's device",
 		description = "Dart recovery for blowpipe cost estimates. Auto-detect reads your cape slot; override if using an untracked cape",
-		position = 4
+		position = 5
 	)
 	default AvasDevice avasDevice()
 	{
@@ -69,7 +80,7 @@ public interface KaChingConfig extends Config
 		keyName = "playSound",
 		name = "Coin jingle",
 		description = "Play the GE coin jingle when money burns",
-		position = 5
+		position = 6
 	)
 	default boolean playSound()
 	{
@@ -81,7 +92,7 @@ public interface KaChingConfig extends Config
 		keyName = "soundVolume",
 		name = "Jingle volume",
 		description = "Volume of the coin jingle (1-127)",
-		position = 6
+		position = 7
 	)
 	default int soundVolume()
 	{
@@ -92,7 +103,7 @@ public interface KaChingConfig extends Config
 		keyName = "minValue",
 		name = "Minimum value",
 		description = "Only ka-ching for at least this many gp",
-		position = 7
+		position = 8
 	)
 	default int minValue()
 	{

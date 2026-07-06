@@ -23,6 +23,9 @@ Sanguinesti cast? *ka-ching.* Cannonball? *ka-ching. ka-ching. ka-ching.*
   when a hit lands).
 - **Dwarf multicannon** — every cannonball fired, at regular or granite prices
   (whichever you loaded). Picking the cannon up refunds; decay does not.
+- **Food & potions** — every bite and sip, pro-rated: a dose from a Prayer
+  potion(3) costs a third of the (3)'s GE price. Gated on the actual Eat/Drink
+  click, so dropping or banking food never rings.
 
 ## How it works
 
