@@ -166,7 +166,6 @@ public class KaChingPlugin extends Plugin
 	private final Map<Integer, Integer> groundThisTick = new HashMap<>();
 	private final List<PendingAmmo> pendingAmmo = new ArrayList<>();
 	private final List<PendingConsume> pendingConsumes = new ArrayList<>();
-	private final Map<Integer, Integer> doseCache = new HashMap<>();
 	private final int[] prevSlotIds = {-1, -1};
 	private final int[] prevSlotQtys = {0, 0};
 	private boolean synced;
@@ -750,9 +749,7 @@ public class KaChingPlugin extends Plugin
 	/**
 	 * Food and potions, gated on an explicit Eat/Drink click so that dropping or
 	 * depositing them can never bill — the click marks intent, the inventory
-	 * decrease confirms it. Potions are pro-rated by the dose count in their
-	 * name: a sip from a "(3)" costs a third of the (3)'s GE price, which is
-	 * self-consistently the per-dose market rate.
+	 * decrease confirms it.
 	 */
 	private long consumablesValue(Map<Integer, Integer> curInv)
 	{
@@ -762,6 +759,7 @@ public class KaChingPlugin extends Plugin
 		}
 		long value = 0;
 		Map<Integer, Integer> billed = new HashMap<>();
+		Map<Integer, Integer> increases = null;
 		for (Iterator<PendingConsume> it = pendingConsumes.iterator(); it.hasNext(); )
 		{
 			PendingConsume pending = it.next();
@@ -770,7 +768,11 @@ public class KaChingPlugin extends Plugin
 			if (decrease > alreadyBilled)
 			{
 				billed.put(pending.itemId, alreadyBilled + 1);
-				value += Math.round((double) itemManager.getItemPrice(pending.itemId) / doses(pending.itemId));
+				if (increases == null)
+				{
+					increases = inventoryIncreases(curInv);
+				}
+				value += consumeCost(pending.itemId, increases);
 				it.remove();
 			}
 			else if (client.getTickCount() >= pending.expiryTick)
@@ -781,13 +783,61 @@ public class KaChingPlugin extends Plugin
 		return value;
 	}
 
-	private int doses(int itemId)
+	/**
+	 * A sip's true cost is the price step down to what you're left holding:
+	 * price(Prayer potion(4)) - price(Prayer potion(3)) — dose prices are not
+	 * linear on the GE — and the last dose credits the empty vial you keep. The
+	 * lower-dose potion appears in the inventory on the tick of the sip and is
+	 * identified by exact name. Falls back to price/doses when it can't be
+	 * found or has no price; plain food bills full price.
+	 */
+	private long consumeCost(int itemId, Map<Integer, Integer> increases)
 	{
-		return doseCache.computeIfAbsent(itemId, id ->
+		int price = itemManager.getItemPrice(itemId);
+		String name = itemManager.getItemComposition(itemId).getName();
+		Matcher doseMatcher = DOSE_SUFFIX.matcher(name);
+		if (!doseMatcher.find())
 		{
-			Matcher matcher = DOSE_SUFFIX.matcher(itemManager.getItemComposition(id).getName());
-			return matcher.find() ? Math.max(1, Integer.parseInt(matcher.group(1))) : 1;
-		});
+			return price;
+		}
+		int doses = Math.max(1, Integer.parseInt(doseMatcher.group(1)));
+
+		int residuePrice = -1;
+		if (doses == 1)
+		{
+			residuePrice = itemManager.getItemPrice(ItemID.VIAL_EMPTY);
+		}
+		else
+		{
+			String expected = name.substring(0, doseMatcher.start()) + "(" + (doses - 1) + ")";
+			for (int increasedId : increases.keySet())
+			{
+				if (expected.equals(itemManager.getItemComposition(increasedId).getName()))
+				{
+					residuePrice = itemManager.getItemPrice(increasedId);
+					break;
+				}
+			}
+		}
+		if (residuePrice > 0)
+		{
+			return Math.max(0, price - residuePrice);
+		}
+		return Math.round((double) price / doses);
+	}
+
+	private Map<Integer, Integer> inventoryIncreases(Map<Integer, Integer> curInv)
+	{
+		Map<Integer, Integer> increases = new HashMap<>();
+		for (Map.Entry<Integer, Integer> entry : curInv.entrySet())
+		{
+			int gained = entry.getValue() - prevInv.getOrDefault(entry.getKey(), 0);
+			if (gained > 0)
+			{
+				increases.put(entry.getKey(), gained);
+			}
+		}
+		return increases;
 	}
 
 	private int priceOf(int itemId)

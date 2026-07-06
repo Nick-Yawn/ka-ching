@@ -58,6 +58,8 @@ public class KaChingAccountingTest
 	private static final int ARROW = 892; // rune arrow
 	private static final int SHARK = 385;
 	private static final int PRAYER_POTION_3 = 139;
+	private static final int PRAYER_POTION_2 = 141;
+	private static final int PRAYER_POTION_1 = 143;
 
 	private static final int DEATH_PRICE = 200;
 	private static final int CHAOS_PRICE = 80;
@@ -397,14 +399,43 @@ public class KaChingAccountingTest
 	}
 
 	@Test
-	public void potionSipsAreProRated()
+	public void potionSipCostsThePriceStepToTheLowerDose()
+	{
+		nameOf(PRAYER_POTION_3, "Prayer potion(3)");
+		nameOf(PRAYER_POTION_2, "Prayer potion(2)");
+		price(PRAYER_POTION_3, 9_000);
+		price(PRAYER_POTION_2, 6_500); // dose prices are not linear
+		setInventory(new Item(PRAYER_POTION_3, 1));
+		tick();
+		clickConsume("Drink", PRAYER_POTION_3);
+		setInventory(new Item(PRAYER_POTION_2, 1)); // the (2) appears on the sip tick
+		tick();
+		verify(overlay).add(2_500L);
+	}
+
+	@Test
+	public void lastDoseCreditsTheEmptyVial()
+	{
+		nameOf(PRAYER_POTION_1, "Prayer potion(1)");
+		price(PRAYER_POTION_1, 2_600);
+		price(ItemID.VIAL_EMPTY, 3);
+		setInventory(new Item(PRAYER_POTION_1, 1));
+		tick();
+		clickConsume("Drink", PRAYER_POTION_1);
+		setInventory(new Item(ItemID.VIAL_EMPTY, 1));
+		tick();
+		verify(overlay).add(2_597L);
+	}
+
+	@Test
+	public void sipFallsBackToLinearProRatingWithoutResidue()
 	{
 		nameOf(PRAYER_POTION_3, "Prayer potion(3)");
 		price(PRAYER_POTION_3, 9_000);
 		setInventory(new Item(PRAYER_POTION_3, 1));
 		tick();
 		clickConsume("Drink", PRAYER_POTION_3);
-		setInventory(); // the (3) became a (2)
+		setInventory(); // lower dose not identifiable this tick
 		tick();
 		verify(overlay).add(3_000L);
 	}
