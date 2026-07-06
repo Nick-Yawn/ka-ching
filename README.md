@@ -31,6 +31,9 @@ Sanguinesti cast? *ka-ching.* Cannonball? *ka-ching. ka-ching. ka-ching.*
   actual Eat/Drink click, so dropping or banking food never rings.
   Container residues (jugs, bowls, pie dishes, beer glasses) are deliberately
   never credited — this is a negative-kaching plugin.
+- **Bones** — burying straight into the dirt rings at full GE price. Altar
+  offerings and every other responsible use stay silent; only the lazy bury
+  is shamed.
 
 ## How it works
 

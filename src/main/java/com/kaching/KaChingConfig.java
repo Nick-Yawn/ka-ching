@@ -56,8 +56,8 @@ public interface KaChingConfig extends Config
 
 	@ConfigItem(
 		keyName = "trackConsumables",
-		name = "Track food & potions",
-		description = "Show the GE price of food you eat and potion doses you drink (pro-rated per dose)",
+		name = "Track food, potions & bones",
+		description = "Show the GE price of food you eat, potion doses you drink (priced per dose) and bones you bury",
 		position = 4
 	)
 	default boolean trackConsumables()

@@ -60,6 +60,7 @@ public class KaChingAccountingTest
 	private static final int PRAYER_POTION_3 = 139;
 	private static final int PRAYER_POTION_2 = 141;
 	private static final int PRAYER_POTION_1 = 143;
+	private static final int DAGANNOTH_BONES = 6729;
 	private static final int MEAT_PIZZA = 2293;
 	private static final int HALF_MEAT_PIZZA = 2295;
 	private static final int APPLE_PIE = 2323;
@@ -443,6 +444,19 @@ public class KaChingAccountingTest
 		setInventory(); // vial smashing: no vial appears
 		tick();
 		verify(overlay).add(2_600L);
+	}
+
+	@Test
+	public void buryingBonesIsBilled()
+	{
+		nameOf(DAGANNOTH_BONES, "Dagannoth bones");
+		price(DAGANNOTH_BONES, 4_200);
+		setInventory(new Item(DAGANNOTH_BONES, 3));
+		tick();
+		clickConsume("Bury", DAGANNOTH_BONES);
+		setInventory(new Item(DAGANNOTH_BONES, 2));
+		tick();
+		verify(overlay).add(4_200L);
 	}
 
 	@Test

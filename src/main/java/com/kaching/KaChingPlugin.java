@@ -45,8 +45,8 @@ import net.runelite.client.util.Text;
 
 @PluginDescriptor(
 	name = "Ka-Ching!",
-	description = "Shows the GE price of every spell cast, broken ammo, weapon charge, cannonball, bite and sip, with a coin jingle",
-	tags = {"kaching", "meme", "money", "cost", "gp", "price", "ge", "sound", "jingle", "ammo", "runes", "blowpipe", "cannon", "food", "potions"}
+	description = "Shows the GE price of every spell cast, broken ammo, weapon charge, cannonball, bite, sip and buried bone, with a coin jingle",
+	tags = {"kaching", "meme", "money", "cost", "gp", "price", "ge", "sound", "jingle", "ammo", "runes", "blowpipe", "cannon", "food", "potions", "bones"}
 )
 public class KaChingPlugin extends Plugin
 {
@@ -350,7 +350,7 @@ public class KaChingPlugin extends Plugin
 			return;
 		}
 		String option = event.getMenuOption();
-		if ("Eat".equals(option) || "Drink".equals(option))
+		if ("Eat".equals(option) || "Drink".equals(option) || "Bury".equals(option))
 		{
 			pendingConsumes.add(new PendingConsume(event.getItemId(), client.getTickCount() + CONSUME_GRACE_TICKS));
 		}
