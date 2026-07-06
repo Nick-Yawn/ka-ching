@@ -45,8 +45,8 @@ import net.runelite.client.util.Text;
 
 @PluginDescriptor(
 	name = "Ka-Ching!",
-	description = "Shows the GE price of every rune you cast and every ammo you break, with a coin jingle",
-	tags = {"meme", "money", "cost", "ge", "sound", "ammo", "runes"}
+	description = "Shows the GE price of every spell cast, broken ammo, weapon charge, cannonball, bite and sip, with a coin jingle",
+	tags = {"kaching", "meme", "money", "cost", "gp", "price", "ge", "sound", "jingle", "ammo", "runes", "blowpipe", "cannon", "food", "potions"}
 )
 public class KaChingPlugin extends Plugin
 {
