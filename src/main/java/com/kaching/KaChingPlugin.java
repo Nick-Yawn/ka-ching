@@ -37,6 +37,7 @@ import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.http.api.item.ItemPrice;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -70,12 +71,17 @@ public class KaChingPlugin extends Plugin
 	// "Prayer potion(3)" -> a sip costs a third of the (3) price
 	private static final Pattern DOSE_SUFFIX = Pattern.compile("\\((\\d)\\)$");
 
-	// Multi-bite foods leave a partial item worth real money: "Cake" -> "2/3 cake",
-	// "Plain pizza" -> "1/2 plain pizza", "Meat pie" -> "Half a meat pie".
-	// Exact prefix+base matching only — an unrelated item arriving mid-bite can't
-	// masquerade as residue. Container residues (jugs, bowls, pie dishes, beer
-	// glasses) are deliberately never credited: this is a negative-kaching plugin.
-	private static final String[] PARTIAL_FOOD_PREFIXES = {"1/2 ", "2/3 ", "Half a ", "Half an "};
+	// Multi-bite foods leave a partial item: "Cake" -> "2/3 cake", "Plain pizza"
+	// -> "1/2 plain pizza", "Meat pie" -> "Half a meat pie". Exact prefix+base
+	// matching only — an unrelated item arriving mid-bite can't masquerade as
+	// residue. The value is the bite fraction: a "2/3" residue means a 3-bite
+	// food, so the bite consumed a third.
+	private static final Map<String, Double> PARTIAL_FOOD_PREFIXES = Map.of(
+		"1/2 ", 0.5,
+		"Half a ", 0.5,
+		"Half an ", 0.5,
+		"2/3 ", 1.0 / 3
+	);
 
 	private static final Set<Integer> RUNE_IDS = Set.of(
 		ItemID.AIRRUNE, ItemID.WATERRUNE, ItemID.EARTHRUNE, ItemID.FIRERUNE,
@@ -805,8 +811,7 @@ public class KaChingPlugin extends Plugin
 		Matcher doseMatcher = DOSE_SUFFIX.matcher(name);
 		if (!doseMatcher.find())
 		{
-			int partialPrice = partialFoodResiduePrice(name, increases);
-			return partialPrice > 0 ? Math.max(0, price - partialPrice) : price;
+			return foodBiteCost(price, name, increases);
 		}
 		int doses = Math.max(1, Integer.parseInt(doseMatcher.group(1)));
 
@@ -839,17 +844,59 @@ public class KaChingPlugin extends Plugin
 		return Math.round((double) price / doses);
 	}
 
-	private int partialFoodResiduePrice(String baseName, Map<Integer, Integer> increases)
+	/**
+	 * Multi-bite foods: the partial residue is usually NOT tradeable on the GE,
+	 * so the price differential only applies when it has a real price. Otherwise
+	 * the matched prefix gives the bite fraction to pro-rate by, and eating a
+	 * partial itself prices the bite off the base item, found by exact name.
+	 * Container residues (jugs, bowls, pie dishes, beer glasses) are
+	 * deliberately never credited: this is a negative-kaching plugin.
+	 */
+	private long foodBiteCost(int price, String name, Map<Integer, Integer> increases)
 	{
+		// Eating a whole item that left a partial behind
 		for (int increasedId : increases.keySet())
 		{
 			String residueName = itemManager.getItemComposition(increasedId).getName();
-			for (String prefix : PARTIAL_FOOD_PREFIXES)
+			for (Map.Entry<String, Double> prefix : PARTIAL_FOOD_PREFIXES.entrySet())
 			{
-				if (residueName.equalsIgnoreCase(prefix + baseName))
+				if (residueName.equalsIgnoreCase(prefix.getKey() + name))
 				{
-					return itemManager.getItemPrice(increasedId);
+					int residuePrice = itemManager.getItemPrice(increasedId);
+					if (residuePrice > 0)
+					{
+						return Math.max(0, price - residuePrice);
+					}
+					return Math.round(price * prefix.getValue());
 				}
+			}
+		}
+		// Eating an untradeable partial: price the bite off its base item
+		if (price <= 0)
+		{
+			for (Map.Entry<String, Double> prefix : PARTIAL_FOOD_PREFIXES.entrySet())
+			{
+				String prefixText = prefix.getKey();
+				if (name.regionMatches(true, 0, prefixText, 0, prefixText.length()))
+				{
+					int basePrice = exactPriceByName(name.substring(prefixText.length()));
+					if (basePrice > 0)
+					{
+						return Math.round(basePrice * prefix.getValue());
+					}
+				}
+			}
+		}
+		return price;
+	}
+
+	private int exactPriceByName(String name)
+	{
+		for (ItemPrice result : itemManager.search(name))
+		{
+			if (name.equalsIgnoreCase(result.getName()))
+			{
+				return itemManager.getItemPrice(result.getId());
 			}
 		}
 		return -1;

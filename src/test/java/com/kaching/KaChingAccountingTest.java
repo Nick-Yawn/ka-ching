@@ -2,6 +2,7 @@ package com.kaching;
 
 import java.lang.reflect.Field;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import net.runelite.api.Actor;
 import net.runelite.api.ChatMessageType;
@@ -31,6 +32,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.http.api.item.ItemPrice;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -61,6 +63,8 @@ public class KaChingAccountingTest
 	private static final int PRAYER_POTION_2 = 141;
 	private static final int PRAYER_POTION_1 = 143;
 	private static final int DAGANNOTH_BONES = 6729;
+	private static final int CAKE = 1891;
+	private static final int TWO_THIRDS_CAKE = 1893;
 	private static final int MEAT_PIZZA = 2293;
 	private static final int HALF_MEAT_PIZZA = 2295;
 	private static final int APPLE_PIE = 2323;
@@ -121,6 +125,7 @@ public class KaChingAccountingTest
 		when(client.getVarpValue(anyInt())).thenReturn(0);
 		when(client.getWidget(anyInt(), anyInt())).thenReturn(null);
 		when(equipment.getItem(anyInt())).thenAnswer(inv -> equipSlots.get(inv.<Integer>getArgument(0)));
+		when(itemManager.search(org.mockito.ArgumentMatchers.anyString())).thenReturn(List.of());
 		setInventory();
 
 		when(config.trackSpells()).thenReturn(true);
@@ -460,18 +465,51 @@ public class KaChingAccountingTest
 	}
 
 	@Test
-	public void firstBiteOfMultiBiteFoodBillsThePriceStep()
+	public void firstBiteProRatesWhenPartialIsUntradeable()
 	{
 		nameOf(MEAT_PIZZA, "Meat pizza");
 		nameOf(HALF_MEAT_PIZZA, "1/2 meat pizza");
 		price(MEAT_PIZZA, 400);
-		price(HALF_MEAT_PIZZA, 180);
+		price(HALF_MEAT_PIZZA, 0); // partials are not GE-tradeable
 		setInventory(new Item(MEAT_PIZZA, 1));
 		tick();
 		clickConsume("Eat", MEAT_PIZZA);
 		setInventory(new Item(HALF_MEAT_PIZZA, 1));
 		tick();
-		verify(overlay).add(220L);
+		verify(overlay).add(200L);
+	}
+
+	@Test
+	public void cakeBiteBillsAThird()
+	{
+		nameOf(CAKE, "Cake");
+		nameOf(TWO_THIRDS_CAKE, "2/3 cake");
+		price(CAKE, 120);
+		price(TWO_THIRDS_CAKE, 0);
+		setInventory(new Item(CAKE, 1));
+		tick();
+		clickConsume("Eat", CAKE);
+		setInventory(new Item(TWO_THIRDS_CAKE, 1));
+		tick();
+		verify(overlay).add(40L);
+	}
+
+	@Test
+	public void eatingAnUntradeablePartialPricesOffTheBase()
+	{
+		nameOf(HALF_MEAT_PIZZA, "1/2 meat pizza");
+		price(HALF_MEAT_PIZZA, 0);
+		price(MEAT_PIZZA, 400);
+		ItemPrice base = mock(ItemPrice.class);
+		when(base.getName()).thenReturn("Meat pizza");
+		when(base.getId()).thenReturn(MEAT_PIZZA);
+		when(itemManager.search("meat pizza")).thenReturn(List.of(base));
+		setInventory(new Item(HALF_MEAT_PIZZA, 1));
+		tick();
+		clickConsume("Eat", HALF_MEAT_PIZZA);
+		setInventory();
+		tick();
+		verify(overlay).add(200L);
 	}
 
 	@Test
