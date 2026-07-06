@@ -66,7 +66,7 @@ and it's remembered. If you unload and switch dart types, Check again.
 
 ## Config
 
-- Independent toggles: spells, ranged ammo, charged weapons, cannon
+- Independent toggles: spells, ranged ammo, charged weapons, cannon, food/potions/bones
 - Ava's device override for blowpipe dart math
 - Coin jingle on/off and volume
 - Minimum gp value to trigger (mute the 15 gp Wind Strikes, keep the barrages)
