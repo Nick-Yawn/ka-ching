@@ -5,9 +5,11 @@ import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.Range;
 
-@ConfigGroup("kaching")
+@ConfigGroup(KaChingConfig.GROUP)
 public interface KaChingConfig extends Config
 {
+	String GROUP = "kaching";
+
 	@ConfigItem(
 		keyName = "trackSpells",
 		name = "Track spell casts",
@@ -33,7 +35,7 @@ public interface KaChingConfig extends Config
 	@ConfigItem(
 		keyName = "trackChargedWeapons",
 		name = "Track charged weapons",
-		description = "Show the per-attack cost of tridents, sanguinesti staff, Tumeken's shadow, warped sceptre, abyssal tentacle and toxic blowpipe",
+		description = "Show the per-attack cost of tridents, sanguinesti staff, Tumeken's shadow, warped sceptre, abyssal tentacle, Scythe of Vitur and toxic blowpipe",
 		position = 2
 	)
 	default boolean trackChargedWeapons()

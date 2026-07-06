@@ -3,7 +3,6 @@ package com.kaching;
 import com.google.inject.Provides;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -17,15 +16,11 @@ import net.runelite.api.EnumComposition;
 import net.runelite.api.EnumID;
 import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.GameState;
-import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
-import net.runelite.api.ItemID;
 import net.runelite.api.Player;
 import net.runelite.api.SoundEffectID;
 import net.runelite.api.TileItem;
-import net.runelite.api.VarPlayer;
-import net.runelite.api.Varbits;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.ChatMessage;
@@ -34,6 +29,11 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.ItemQuantityChanged;
 import net.runelite.api.events.ItemSpawned;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.ItemID;
+import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
@@ -51,37 +51,46 @@ public class KaChingPlugin extends Plugin
 {
 	// Ammo leaves the equipment slot when fired, but only hits the ground when
 	// the projectile lands. Hold losses this many ticks before declaring them broken.
-	private static final int AMMO_GRACE_TICKS = 4;
+	private static final int AMMO_GRACE_TICKS = 5;
 	// After dying, gear scatters everywhere; don't count anything for a while.
 	private static final int DEATH_COOLDOWN_TICKS = 10;
+	// Deposits/trades are processed by the server a tick after the interface
+	// closes client-side; keep suppressing briefly so they don't count as casts.
+	private static final int INTERFACE_GRACE_TICKS = 2;
+	// A region reload re-fires ItemSpawned for every ground item in the scene.
+	private static final int LOADING_GRACE_TICKS = 1;
+	// Bulk rune removals that exactly match at least this many charges of a
+	// weapon recipe are recharges even when the chat message isn't recognized —
+	// no spell consumes five charges' worth of a recipe in one tick.
+	private static final int MIN_RECHARGE_CHARGES = 5;
 
-	private static final Set<Integer> RUNE_IDS = new HashSet<>(List.of(
-		ItemID.AIR_RUNE, ItemID.WATER_RUNE, ItemID.EARTH_RUNE, ItemID.FIRE_RUNE,
-		ItemID.MIND_RUNE, ItemID.BODY_RUNE, ItemID.COSMIC_RUNE, ItemID.CHAOS_RUNE,
-		ItemID.NATURE_RUNE, ItemID.LAW_RUNE, ItemID.DEATH_RUNE, ItemID.ASTRAL_RUNE,
-		ItemID.BLOOD_RUNE, ItemID.SOUL_RUNE, ItemID.WRATH_RUNE, ItemID.SUNFIRE_RUNE,
-		ItemID.MIST_RUNE, ItemID.DUST_RUNE, ItemID.MUD_RUNE,
-		ItemID.SMOKE_RUNE, ItemID.STEAM_RUNE, ItemID.LAVA_RUNE
-	));
+	private static final Set<Integer> RUNE_IDS = Set.of(
+		ItemID.AIRRUNE, ItemID.WATERRUNE, ItemID.EARTHRUNE, ItemID.FIRERUNE,
+		ItemID.MINDRUNE, ItemID.BODYRUNE, ItemID.COSMICRUNE, ItemID.CHAOSRUNE,
+		ItemID.NATURERUNE, ItemID.LAWRUNE, ItemID.DEATHRUNE, ItemID.ASTRALRUNE,
+		ItemID.BLOODRUNE, ItemID.SOULRUNE, ItemID.WRATHRUNE, ItemID.SUNFIRERUNE,
+		ItemID.MISTRUNE, ItemID.DUSTRUNE, ItemID.MUDRUNE,
+		ItemID.SMOKERUNE, ItemID.STEAMRUNE, ItemID.LAVARUNE
+	);
 
 	// Interfaces where items legitimately leave the inventory/equipment without being consumed
 	private static final int[] BUSY_INTERFACE_GROUPS = {
-		12,  // bank
-		192, // deposit box
-		300, // shop
-		334, // trade confirm
-		335, // trade
-		402, // GE collection box
-		465, // grand exchange
+		InterfaceID.BANKMAIN,
+		InterfaceID.BANK_DEPOSITBOX,
+		InterfaceID.SHOPMAIN,
+		InterfaceID.TRADECONFIRM,
+		InterfaceID.TRADEMAIN,
+		InterfaceID.GE_COLLECT,
+		InterfaceID.GE_OFFERS,
 	};
 
 	private static final int[] POUCH_RUNE_VARBITS = {
-		Varbits.RUNE_POUCH_RUNE1, Varbits.RUNE_POUCH_RUNE2, Varbits.RUNE_POUCH_RUNE3,
-		Varbits.RUNE_POUCH_RUNE4, Varbits.RUNE_POUCH_RUNE5, Varbits.RUNE_POUCH_RUNE6,
+		VarbitID.RUNE_POUCH_TYPE_1, VarbitID.RUNE_POUCH_TYPE_2, VarbitID.RUNE_POUCH_TYPE_3,
+		VarbitID.RUNE_POUCH_TYPE_4, VarbitID.RUNE_POUCH_TYPE_5, VarbitID.RUNE_POUCH_TYPE_6,
 	};
 	private static final int[] POUCH_AMOUNT_VARBITS = {
-		Varbits.RUNE_POUCH_AMOUNT1, Varbits.RUNE_POUCH_AMOUNT2, Varbits.RUNE_POUCH_AMOUNT3,
-		Varbits.RUNE_POUCH_AMOUNT4, Varbits.RUNE_POUCH_AMOUNT5, Varbits.RUNE_POUCH_AMOUNT6,
+		VarbitID.RUNE_POUCH_QUANTITY_1, VarbitID.RUNE_POUCH_QUANTITY_2, VarbitID.RUNE_POUCH_QUANTITY_3,
+		VarbitID.RUNE_POUCH_QUANTITY_4, VarbitID.RUNE_POUCH_QUANTITY_5, VarbitID.RUNE_POUCH_QUANTITY_6,
 	};
 
 	private static final int[] TRACKED_EQUIP_SLOTS = {
@@ -109,22 +118,24 @@ public class KaChingPlugin extends Plugin
 		"dragon", ItemID.DRAGON_DART
 	);
 
-	// Cape-slot item -> fraction of darts lost per blowpipe shot (1 - recovery rate)
-	private static final Map<Integer, Double> AVAS_CAPES = Map.of(
-		ItemID.AVAS_ATTRACTOR, 0.4,
-		ItemID.AVAS_ACCUMULATOR, 0.28,
-		ItemID.ACCUMULATOR_MAX_CAPE, 0.28,
-		ItemID.AVAS_ASSEMBLER, 0.2,
-		ItemID.ASSEMBLER_MAX_CAPE, 0.2,
-		ItemID.MASORI_ASSEMBLER, 0.2,
-		ItemID.MASORI_ASSEMBLER_MAX_CAPE, 0.2,
-		ItemID.BLESSED_DIZANAS_QUIVER, 0.2,
-		ItemID.DIZANAS_MAX_CAPE, 0.2
+	// Cape-slot item -> fraction of darts lost per blowpipe shot (1 - recovery rate).
+	// The ranging cape gives the accumulator effect (the Vorkath's-head upgrade to
+	// assembler rates isn't visible client-side; the config override covers it).
+	private static final Map<Integer, Double> AVAS_CAPES = Map.ofEntries(
+		Map.entry(ItemID.ANMA_30_REWARD, 0.4),          // Ava's attractor
+		Map.entry(ItemID.ANMA_50_REWARD, 0.28),         // Ava's accumulator
+		Map.entry(ItemID.SKILLCAPE_MAX_ANMA, 0.28),     // Accumulator max cape
+		Map.entry(ItemID.SKILLCAPE_RANGING, 0.28),
+		Map.entry(ItemID.SKILLCAPE_RANGING_TRIMMED, 0.28),
+		Map.entry(ItemID.AVAS_ASSEMBLER, 0.2),
+		Map.entry(ItemID.SKILLCAPE_MAX_ASSEMBLER, 0.2),
+		Map.entry(ItemID.AVAS_ASSEMBLER_MASORI, 0.2),
+		Map.entry(ItemID.SKILLCAPE_MAX_ASSEMBLER_MASORI, 0.2),
+		Map.entry(ItemID.DIZANAS_QUIVER_INFINITE, 0.2), // blessed quiver
+		Map.entry(ItemID.SKILLCAPE_MAX_DIZANAS, 0.2)
 	);
 
-	// Classic ItemID dropped CANNONBALL; Jagex's internal name is "mcannonball"
-	private static final int CANNONBALL = net.runelite.api.gameval.ItemID.MCANNONBALL;
-	private static final int[] CANNONBALL_IDS = {CANNONBALL, ItemID.GRANITE_CANNONBALL};
+	private static final int[] CANNONBALL_IDS = {ItemID.MCANNONBALL, ItemID.GRANITE_CANNONBALL};
 
 	@Inject
 	private Client client;
@@ -144,19 +155,22 @@ public class KaChingPlugin extends Plugin
 	@Inject
 	private ConfigManager configManager;
 
-	private final Map<Integer, Integer> prevInv = new HashMap<>();
-	private final Map<Integer, Integer> prevPouch = new HashMap<>();
+	private Map<Integer, Integer> prevInv = new HashMap<>();
+	private Map<Integer, Integer> prevPouch = new HashMap<>();
 	private final Map<Integer, Integer> groundThisTick = new HashMap<>();
 	private final List<PendingAmmo> pendingAmmo = new ArrayList<>();
 	private final int[] prevSlotIds = {-1, -1};
 	private final int[] prevSlotQtys = {0, 0};
 	private boolean synced;
 	private int deathCooldown;
+	private int lastBusyTick = -1;
+	private int lastLoadingTick = -1;
 	private int lastAnimationId = -1;
 	private int lastAnimationTick = -1;
 	private int suppressRunesUntilTick = -1;
 	private int prevCannonAmmo = -1;
-	private int cannonBallItemId = CANNONBALL;
+	// deliberately survives reset(): the cannon and its load outlive hops/logouts
+	private int cannonBallItemId = ItemID.MCANNONBALL;
 	private int dartItemId = -1;
 	private boolean dartHintShown;
 	private boolean dealtDamageThisTick;
@@ -165,7 +179,7 @@ public class KaChingPlugin extends Plugin
 	{
 		final int itemId;
 		int quantity;
-		final int expiryTick;
+		int expiryTick;
 
 		PendingAmmo(int itemId, int quantity, int expiryTick)
 		{
@@ -187,7 +201,7 @@ public class KaChingPlugin extends Plugin
 		overlayManager.add(overlay);
 		reset();
 		dartHintShown = false;
-		String dart = configManager.getConfiguration("kaching", "dartType");
+		String dart = configManager.getConfiguration(KaChingConfig.GROUP, "dartType");
 		dartItemId = dart != null && DART_IDS.containsKey(dart) ? DART_IDS.get(dart) : -1;
 	}
 
@@ -201,26 +215,37 @@ public class KaChingPlugin extends Plugin
 
 	private void reset()
 	{
-		prevInv.clear();
-		prevPouch.clear();
+		prevInv = new HashMap<>();
+		prevPouch = new HashMap<>();
 		groundThisTick.clear();
 		pendingAmmo.clear();
 		prevSlotIds[0] = prevSlotIds[1] = -1;
 		prevSlotQtys[0] = prevSlotQtys[1] = 0;
 		synced = false;
 		deathCooldown = 0;
+		lastBusyTick = -1;
+		lastLoadingTick = -1;
 		lastAnimationId = -1;
 		lastAnimationTick = -1;
 		suppressRunesUntilTick = -1;
 		prevCannonAmmo = -1;
+		dealtDamageThisTick = false;
 	}
 
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
-		if (event.getGameState() == GameState.LOGIN_SCREEN || event.getGameState() == GameState.HOPPING)
+		switch (event.getGameState())
 		{
-			reset();
+			case LOGIN_SCREEN:
+			case HOPPING:
+				reset();
+				break;
+			case LOADING:
+				lastLoadingTick = client.getTickCount();
+				break;
+			default:
+				break;
 		}
 	}
 
@@ -250,6 +275,17 @@ public class KaChingPlugin extends Plugin
 	}
 
 	@Subscribe
+	public void onHitsplatApplied(HitsplatApplied event)
+	{
+		if (event.getActor() != client.getLocalPlayer()
+			&& event.getHitsplat().isMine()
+			&& event.getHitsplat().getAmount() > 0)
+		{
+			dealtDamageThisTick = true;
+		}
+	}
+
+	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
 		ChatMessageType type = event.getType();
@@ -274,27 +310,15 @@ public class KaChingPlugin extends Plugin
 			if (dartId != null)
 			{
 				dartItemId = dartId;
-				configManager.setConfiguration("kaching", "dartType", dartName);
+				configManager.setConfiguration(KaChingConfig.GROUP, "dartType", dartName);
 			}
-		}
-	}
-
-	@Subscribe
-	public void onHitsplatApplied(HitsplatApplied event)
-	{
-		if (event.getActor() != client.getLocalPlayer()
-			&& event.getHitsplat().isMine()
-			&& event.getHitsplat().getAmount() > 0)
-		{
-			dealtDamageThisTick = true;
 		}
 	}
 
 	@Subscribe
 	public void onItemSpawned(ItemSpawned event)
 	{
-		TileItem item = event.getItem();
-		groundThisTick.merge(item.getId(), item.getQuantity(), Integer::sum);
+		recordGroundSpawn(event.getItem(), event.getItem().getQuantity());
 	}
 
 	@Subscribe
@@ -303,23 +327,46 @@ public class KaChingPlugin extends Plugin
 		int delta = event.getNewQuantity() - event.getOldQuantity();
 		if (delta > 0)
 		{
-			groundThisTick.merge(event.getItem().getId(), delta, Integer::sum);
+			recordGroundSpawn(event.getItem(), delta);
+		}
+	}
+
+	/**
+	 * Only the player's own drops and projectiles forgive consumption — another
+	 * player's identical litter appearing nearby shouldn't cancel our accounting.
+	 */
+	private void recordGroundSpawn(TileItem item, int quantity)
+	{
+		int ownership = item.getOwnership();
+		if (ownership == TileItem.OWNERSHIP_SELF || ownership == TileItem.OWNERSHIP_GROUP)
+		{
+			groundThisTick.merge(item.getId(), quantity, Integer::sum);
 		}
 	}
 
 	@Subscribe
-	public void onGameTick(GameTick tick)
+	public void onGameTick(GameTick tickEvent)
 	{
 		if (client.getGameState() != GameState.LOGGED_IN)
 		{
 			groundThisTick.clear();
+			dealtDamageThisTick = false;
 			return;
+		}
+
+		int tick = client.getTickCount();
+		if (isBusyInterfaceOpen())
+		{
+			lastBusyTick = tick;
 		}
 
 		Map<Integer, Integer> curInv = readInventory();
 		Map<Integer, Integer> curPouch = readRunePouch();
 
-		boolean counting = synced && deathCooldown == 0 && !isBusyInterfaceOpen();
+		boolean counting = synced
+			&& deathCooldown == 0
+			&& tick > lastBusyTick + INTERFACE_GRACE_TICKS
+			&& tick > lastLoadingTick + LOADING_GRACE_TICKS;
 		if (deathCooldown > 0)
 		{
 			deathCooldown--;
@@ -327,35 +374,27 @@ public class KaChingPlugin extends Plugin
 
 		long value = 0;
 
-		if (counting && config.trackSpells() && client.getTickCount() > suppressRunesUntilTick)
+		if (counting && config.trackSpells() && tick > suppressRunesUntilTick)
 		{
 			value += runesConsumedValue(curInv, curPouch);
 		}
 
-		if (config.trackAmmo())
-		{
-			value += trackAmmo(curInv, counting);
-		}
+		value += trackAmmo(curInv, counting);
 
 		if (counting && config.trackChargedWeapons())
 		{
 			value += chargedWeaponValue();
 		}
 
-		if (config.trackCannon())
-		{
-			value += cannonValue(curInv);
-		}
+		value += cannonValue(curInv);
 
 		if (value >= Math.max(1, config.minValue()))
 		{
 			kaching(value);
 		}
 
-		prevInv.clear();
-		prevInv.putAll(curInv);
-		prevPouch.clear();
-		prevPouch.putAll(curPouch);
+		prevInv = curInv;
+		prevPouch = curPouch;
 		groundThisTick.clear();
 		dealtDamageThisTick = false;
 		synced = true;
@@ -363,27 +402,82 @@ public class KaChingPlugin extends Plugin
 
 	/**
 	 * Runes that vanished from inventory + rune pouch this tick, minus any that
-	 * hit the ground (dropped, not cast), priced at GE value.
+	 * hit the ground (dropped, not cast), priced at GE value. Bulk removals
+	 * shaped exactly like a charged weapon's recipe are recharges, not casts.
 	 */
 	private long runesConsumedValue(Map<Integer, Integer> curInv, Map<Integer, Integer> curPouch)
 	{
-		long value = 0;
+		Map<Integer, Integer> decreases = new HashMap<>();
 		for (int runeId : RUNE_IDS)
 		{
 			int prev = prevInv.getOrDefault(runeId, 0) + prevPouch.getOrDefault(runeId, 0);
 			int cur = curInv.getOrDefault(runeId, 0) + curPouch.getOrDefault(runeId, 0);
-			int consumed = prev - cur;
-			if (consumed <= 0)
+			if (prev > cur)
 			{
-				continue;
+				decreases.put(runeId, prev - cur);
 			}
-			consumed -= takeFromGround(runeId, consumed);
+		}
+		if (decreases.isEmpty() || looksLikeRecharge(decreases))
+		{
+			return 0;
+		}
+
+		long value = 0;
+		for (Map.Entry<Integer, Integer> entry : decreases.entrySet())
+		{
+			int consumed = entry.getValue() - takeFromGround(entry.getKey(), entry.getValue());
 			if (consumed > 0)
 			{
-				value += (long) itemManager.getItemPrice(runeId) * consumed;
+				value += (long) itemManager.getItemPrice(entry.getKey()) * consumed;
 			}
 		}
 		return value;
+	}
+
+	private boolean looksLikeRecharge(Map<Integer, Integer> decreases)
+	{
+		for (ChargedWeapon weapon : ChargedWeapon.values())
+		{
+			Map<Integer, Integer> recipe = new HashMap<>();
+			for (ChargedWeapon.ChargeCost cost : weapon.costs)
+			{
+				if (RUNE_IDS.contains(cost.itemId) && cost.quantity >= 1)
+				{
+					recipe.put(cost.itemId, (int) cost.quantity);
+				}
+			}
+			if (recipe.isEmpty() || !decreases.keySet().equals(recipe.keySet()))
+			{
+				continue;
+			}
+
+			int charges = -1;
+			boolean match = true;
+			for (Map.Entry<Integer, Integer> entry : recipe.entrySet())
+			{
+				int decrease = decreases.get(entry.getKey());
+				if (decrease % entry.getValue() != 0)
+				{
+					match = false;
+					break;
+				}
+				int multiple = decrease / entry.getValue();
+				if (charges == -1)
+				{
+					charges = multiple;
+				}
+				else if (charges != multiple)
+				{
+					match = false;
+					break;
+				}
+			}
+			if (match && charges >= MIN_RECHARGE_CHARGES)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -391,10 +485,13 @@ public class KaChingPlugin extends Plugin
 	 * losses are forgiven if the ammo shows up on the ground (recoverable drop)
 	 * within the grace window, and cashed in as broken once the window expires.
 	 * Ava's saves never decrement the slot, so they never enter the pipeline.
+	 * Slot snapshots are maintained even when the toggle is off or counting is
+	 * suppressed so that re-enabling can't misread the gap as consumption.
 	 */
 	private long trackAmmo(Map<Integer, Integer> curInv, boolean counting)
 	{
-		ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
+		ItemContainer equipment = client.getItemContainer(InventoryID.WORN);
+		boolean track = config.trackAmmo();
 		for (int s = 0; s < TRACKED_EQUIP_SLOTS.length; s++)
 		{
 			int id = -1;
@@ -415,7 +512,7 @@ public class KaChingPlugin extends Plugin
 			prevSlotQtys[s] = qty;
 
 			// Same item shrank, or the slot emptied (last ammo fired / unequipped)
-			if (!counting || prevId == -1 || (id != prevId && id != -1))
+			if (!track || !counting || prevId == -1 || (id != prevId && id != -1))
 			{
 				continue;
 			}
@@ -428,6 +525,12 @@ public class KaChingPlugin extends Plugin
 			}
 		}
 
+		if (!track)
+		{
+			pendingAmmo.clear();
+			return 0;
+		}
+
 		long value = 0;
 		for (Iterator<PendingAmmo> it = pendingAmmo.iterator(); it.hasNext(); )
 		{
@@ -436,6 +539,12 @@ public class KaChingPlugin extends Plugin
 			if (pending.quantity <= 0)
 			{
 				it.remove();
+			}
+			else if (!counting)
+			{
+				// While suppressed (bank open, region loading) hold pendings open
+				// rather than cashing them in with forgiveness data missing
+				pending.expiryTick++;
 			}
 			else if (client.getTickCount() >= pending.expiryTick)
 			{
@@ -447,16 +556,17 @@ public class KaChingPlugin extends Plugin
 	}
 
 	/**
-	 * Charged weapons (tridents, sang, shadow, sceptre, tentacle, blowpipe) burn
-	 * internal charges invisible to item containers, so attacks are detected
-	 * directly: one AnimationChanged per attack for weapons whose animation ends
-	 * between attacks, or an animation frame reset for the blowpipe, whose
-	 * animation outlasts its rapid-fire cooldown and never re-fires the event.
+	 * Charged weapons (tridents, sang, shadow, sceptre, tentacle, scythe,
+	 * blowpipe) burn internal charges invisible to item containers, so attacks
+	 * are detected directly: one AnimationChanged per attack for weapons whose
+	 * animation ends between attacks, or an animation frame reset for the
+	 * blowpipe, whose animation outlasts its rapid-fire cooldown and never
+	 * re-fires the event.
 	 */
 	private long chargedWeaponValue()
 	{
 		Player player = client.getLocalPlayer();
-		ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
+		ItemContainer equipment = client.getItemContainer(InventoryID.WORN);
 		if (player == null || equipment == null)
 		{
 			return 0;
@@ -487,7 +597,9 @@ public class KaChingPlugin extends Plugin
 		}
 
 		// Scythe charges only burn when at least one hit deals damage; scythe is
-		// melee, so its hitsplats land on the same tick as the attack animation
+		// melee, so its hitsplats land on the same tick as the attack animation.
+		// (A thrall's damage on the same tick can satisfy this gate spuriously —
+		// hitsplats don't identify their source weapon.)
 		if (charged == ChargedWeapon.SCYTHE_OF_VITUR && !dealtDamageThisTick)
 		{
 			return 0;
@@ -513,7 +625,7 @@ public class KaChingPlugin extends Plugin
 	 */
 	private long blowpipeShotValue(ItemContainer equipment)
 	{
-		double value = itemManager.getItemPrice(ItemID.ZULRAHS_SCALES) * (2.0 / 3);
+		double value = itemManager.getItemPrice(ItemID.SNAKEBOSS_SCALE) * (2.0 / 3);
 		if (dartItemId != -1)
 		{
 			value += itemManager.getItemPrice(dartItemId) * dartLossRate(equipment);
@@ -547,17 +659,19 @@ public class KaChingPlugin extends Plugin
 	}
 
 	/**
-	 * Cannon ammo is server-synced (varp 3), so a decrease is ground truth for
-	 * shots fired. Picking the cannon up refunds balls to the inventory (or
-	 * ground) the same tick; those are forgiven like unequipped ammo. Loading is
-	 * a varp increase, used to note which ball type is in the magazine.
+	 * Cannon ammo is server-synced, so a decrease is ground truth for shots
+	 * fired. Only picking the cannon up both empties it and refunds the balls
+	 * (to the inventory, or the ground when full), so refund forgiveness only
+	 * applies when the count reaches zero — acquiring cannonballs any other way
+	 * can't suppress real shots. The varp snapshot is maintained even when the
+	 * toggle is off so re-enabling can't fabricate a delta.
 	 */
 	private long cannonValue(Map<Integer, Integer> curInv)
 	{
-		int cur = client.getVarpValue(VarPlayer.CANNON_AMMO);
+		int cur = client.getVarpValue(VarPlayerID.ROCKTHROWER); // cannonballs left in your cannon
 		int prev = prevCannonAmmo;
 		prevCannonAmmo = cur;
-		if (prev == -1)
+		if (prev == -1 || !config.trackCannon())
 		{
 			return 0;
 		}
@@ -565,21 +679,33 @@ public class KaChingPlugin extends Plugin
 		int delta = prev - cur;
 		if (delta < 0)
 		{
+			// Loading: note which ball type left the inventory, preferring the
+			// larger decrease when both types moved on the same tick
+			int best = 0;
 			for (int ballId : CANNONBALL_IDS)
 			{
-				if (prevInv.getOrDefault(ballId, 0) > curInv.getOrDefault(ballId, 0))
+				int loaded = prevInv.getOrDefault(ballId, 0) - curInv.getOrDefault(ballId, 0);
+				if (loaded > best)
 				{
+					best = loaded;
 					cannonBallItemId = ballId;
 				}
 			}
 			return 0;
 		}
+		if (delta == 0)
+		{
+			return 0;
+		}
 
 		int forgiven = 0;
-		for (int ballId : CANNONBALL_IDS)
+		if (cur == 0)
 		{
-			forgiven += Math.max(0, curInv.getOrDefault(ballId, 0) - prevInv.getOrDefault(ballId, 0));
-			forgiven += takeFromGround(ballId, delta - forgiven);
+			for (int ballId : CANNONBALL_IDS)
+			{
+				forgiven += Math.max(0, curInv.getOrDefault(ballId, 0) - prevInv.getOrDefault(ballId, 0));
+				forgiven += takeFromGround(ballId, delta - forgiven);
+			}
 		}
 		int shots = delta - forgiven;
 		return shots > 0 ? (long) shots * priceOf(cannonBallItemId) : 0;
@@ -588,7 +714,7 @@ public class KaChingPlugin extends Plugin
 	private int priceOf(int itemId)
 	{
 		// Coins aren't GE-tradeable; 1 gp is 1 gp
-		return itemId == ChargedWeapon.COINS ? 1 : itemManager.getItemPrice(itemId);
+		return itemId == ItemID.COINS ? 1 : itemManager.getItemPrice(itemId);
 	}
 
 	private void kaching(long value)
@@ -603,6 +729,10 @@ public class KaChingPlugin extends Plugin
 	/** Consume up to {@code wanted} of an item from this tick's ground spawns; returns how many were taken. */
 	private int takeFromGround(int itemId, int wanted)
 	{
+		if (wanted <= 0)
+		{
+			return 0;
+		}
 		int available = groundThisTick.getOrDefault(itemId, 0);
 		if (available <= 0)
 		{
@@ -616,7 +746,7 @@ public class KaChingPlugin extends Plugin
 	private Map<Integer, Integer> readInventory()
 	{
 		Map<Integer, Integer> counts = new HashMap<>();
-		ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
+		ItemContainer inventory = client.getItemContainer(InventoryID.INV);
 		if (inventory != null)
 		{
 			for (Item item : inventory.getItems())

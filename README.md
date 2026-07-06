@@ -30,9 +30,13 @@ Sanguinesti cast? *ka-ching.* Cannonball? *ka-ching. ka-ching. ka-ching.*
   that didn't hit the ground and didn't happen at a bank/GE/trade/shop are casts.
   Recharging a trident/sang/shadow/sceptre is detected via its chat dialog and
   excluded — you pay per cast instead, no double counting.
-- Equipped weapon/ammo slot decreases enter a 4-tick grace window (projectile flight
+- Equipped weapon/ammo slot decreases enter a 5-tick grace window (projectile flight
   time). If matching ammo spawns on the ground before the window ends, it was a drop;
-  otherwise it broke and you hear about it.
+  otherwise it broke and you hear about it. Only your own drops count as forgiveness —
+  another player's identical ammo landing nearby doesn't confuse the accounting.
+- Recharges are never billed as casts: recognized charging messages suppress the rune
+  tracker, and any bulk rune removal shaped exactly like a weapon's charge recipe
+  (5+ charges at once) is treated as a recharge even if the message wasn't recognized.
 - Charged weapon attacks are detected per-attack: one animation event per attack for
   4/5-tick weapons, or the animation frame resetting for the blowpipe (whose animation
   outlasts its rapid-fire cooldown).
@@ -42,7 +46,9 @@ Sanguinesti cast? *ka-ching.* Cannonball? *ka-ching. ka-ching. ka-ching.*
 
 Blowpipe costs are expected values: ⅔ scale per shot (1-in-3 save) plus darts lost at
 (1 − Ava's recovery) — 100% with no device, 60% attractor, 28% accumulator, 20%
-assembler (auto-detected from your cape slot; override in config). The plugin learns
+assembler. Auto-detect covers Ava's devices, ranging capes, accumulator/assembler max
+capes, and Dizana's quivers; anything else (e.g. a Vorkath-upgraded ranging cape)
+uses the config override. The plugin learns
 your dart type from the right-click **Check** option on the blowpipe — do that once
 and it's remembered. If you unload and switch dart types, Check again.
 
@@ -56,6 +62,8 @@ and it's remembered. If you unload and switch dart types, Check again.
 ## Known limitations
 
 - Weapons not in the table are silent.
+- Scythe swings that splash 0-0-0 while a thrall deals damage on the same tick are
+  billed anyway — hitsplats don't identify their source weapon.
 - If another player's identical ammo lands nearby during the grace window, a break
   may be forgiven as a drop. It's a meme plugin, not an accountant.
 - Blowpipe/charged-weapon animation IDs can change with game updates; if a weapon
