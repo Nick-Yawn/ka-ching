@@ -428,6 +428,20 @@ public class KaChingAccountingTest
 	}
 
 	@Test
+	public void smashedVialIsNotCredited()
+	{
+		nameOf(PRAYER_POTION_1, "Prayer potion(1)");
+		price(PRAYER_POTION_1, 2_600);
+		price(ItemID.VIAL_EMPTY, 3);
+		setInventory(new Item(PRAYER_POTION_1, 1));
+		tick();
+		clickConsume("Drink", PRAYER_POTION_1);
+		setInventory(); // vial smashing: no vial appears
+		tick();
+		verify(overlay).add(2_600L);
+	}
+
+	@Test
 	public void sipFallsBackToLinearProRatingWithoutResidue()
 	{
 		nameOf(PRAYER_POTION_3, "Prayer potion(3)");

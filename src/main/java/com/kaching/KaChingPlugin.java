@@ -805,7 +805,12 @@ public class KaChingPlugin extends Plugin
 		int residuePrice = -1;
 		if (doses == 1)
 		{
-			residuePrice = itemManager.getItemPrice(ItemID.VIAL_EMPTY);
+			// Credit the vial only if one actually appeared — with vial smashing
+			// unlocked, the glassware is destroyed and its value truly lost
+			if (increases.containsKey(ItemID.VIAL_EMPTY))
+			{
+				residuePrice = itemManager.getItemPrice(ItemID.VIAL_EMPTY);
+			}
 		}
 		else
 		{
