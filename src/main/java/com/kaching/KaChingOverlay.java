@@ -25,7 +25,9 @@ import net.runelite.client.util.QuantityFormatter;
 public class KaChingOverlay extends Overlay
 {
 	private static final int DURATION_MS = 2600;
-	private static final int RISE_PX = 60;
+	// Fast enough that drops born on consecutive game ticks (600ms) are separated
+	// by more than a line of text — age alone keeps simultaneous pops legible
+	private static final int RISE_PX = 100;
 	private static final Color COIN_GOLD = new Color(255, 215, 0);
 
 	private final Client client;
@@ -87,7 +89,6 @@ public class KaChingOverlay extends Overlay
 
 		synchronized (drops)
 		{
-			int stack = 0;
 			for (Iterator<Drop> it = drops.iterator(); it.hasNext(); )
 			{
 				Drop drop = it.next();
@@ -107,7 +108,7 @@ public class KaChingOverlay extends Overlay
 				}
 
 				int x = base.getX();
-				int y = base.getY() - (int) (progress * RISE_PX) - stack * 16;
+				int y = base.getY() - (int) (progress * RISE_PX);
 				// Hold full opacity for the first half, then fade
 				int alpha = progress < 0.5f ? 255 : (int) (255 * (1f - (progress - 0.5f) * 2f));
 
@@ -115,7 +116,6 @@ public class KaChingOverlay extends Overlay
 				graphics.drawString(drop.text, x + 1, y + 1);
 				graphics.setColor(new Color(COIN_GOLD.getRed(), COIN_GOLD.getGreen(), COIN_GOLD.getBlue(), alpha));
 				graphics.drawString(drop.text, x, y);
-				stack++;
 			}
 		}
 		return null;

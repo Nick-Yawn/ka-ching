@@ -356,6 +356,19 @@ public class KaChingAccountingTest
 		verify(overlay, times(1)).add(Math.round(SCALE_PRICE * (2.0 / 3)));
 	}
 
+	@Test
+	public void sameTickCostsSumIntoOnePop()
+	{
+		setInventory(new Item(ItemID.DEATHRUNE, 10));
+		when(client.getVarpValue(VarPlayerID.ROCKTHROWER)).thenReturn(30);
+		tick();
+		// a cast and a cannon shot land on the same tick
+		setInventory(new Item(ItemID.DEATHRUNE, 9));
+		when(client.getVarpValue(VarPlayerID.ROCKTHROWER)).thenReturn(29);
+		tick();
+		verify(overlay).add((long) DEATH_PRICE + CANNONBALL_PRICE);
+	}
+
 	// ---- food & potions ----
 
 	@Test
