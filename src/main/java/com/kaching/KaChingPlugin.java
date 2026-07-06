@@ -70,6 +70,13 @@ public class KaChingPlugin extends Plugin
 	// "Prayer potion(3)" -> a sip costs a third of the (3) price
 	private static final Pattern DOSE_SUFFIX = Pattern.compile("\\((\\d)\\)$");
 
+	// Multi-bite foods leave a partial item worth real money: "Cake" -> "2/3 cake",
+	// "Plain pizza" -> "1/2 plain pizza", "Meat pie" -> "Half a meat pie".
+	// Exact prefix+base matching only — an unrelated item arriving mid-bite can't
+	// masquerade as residue. Container residues (jugs, bowls, pie dishes, beer
+	// glasses) are deliberately never credited: this is a negative-kaching plugin.
+	private static final String[] PARTIAL_FOOD_PREFIXES = {"1/2 ", "2/3 ", "Half a ", "Half an "};
+
 	private static final Set<Integer> RUNE_IDS = Set.of(
 		ItemID.AIRRUNE, ItemID.WATERRUNE, ItemID.EARTHRUNE, ItemID.FIRERUNE,
 		ItemID.MINDRUNE, ItemID.BODYRUNE, ItemID.COSMICRUNE, ItemID.CHAOSRUNE,
@@ -798,7 +805,8 @@ public class KaChingPlugin extends Plugin
 		Matcher doseMatcher = DOSE_SUFFIX.matcher(name);
 		if (!doseMatcher.find())
 		{
-			return price;
+			int partialPrice = partialFoodResiduePrice(name, increases);
+			return partialPrice > 0 ? Math.max(0, price - partialPrice) : price;
 		}
 		int doses = Math.max(1, Integer.parseInt(doseMatcher.group(1)));
 
@@ -829,6 +837,22 @@ public class KaChingPlugin extends Plugin
 			return Math.max(0, price - residuePrice);
 		}
 		return Math.round((double) price / doses);
+	}
+
+	private int partialFoodResiduePrice(String baseName, Map<Integer, Integer> increases)
+	{
+		for (int increasedId : increases.keySet())
+		{
+			String residueName = itemManager.getItemComposition(increasedId).getName();
+			for (String prefix : PARTIAL_FOOD_PREFIXES)
+			{
+				if (residueName.equalsIgnoreCase(prefix + baseName))
+				{
+					return itemManager.getItemPrice(increasedId);
+				}
+			}
+		}
+		return -1;
 	}
 
 	private Map<Integer, Integer> inventoryIncreases(Map<Integer, Integer> curInv)

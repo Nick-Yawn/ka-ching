@@ -60,6 +60,10 @@ public class KaChingAccountingTest
 	private static final int PRAYER_POTION_3 = 139;
 	private static final int PRAYER_POTION_2 = 141;
 	private static final int PRAYER_POTION_1 = 143;
+	private static final int MEAT_PIZZA = 2293;
+	private static final int HALF_MEAT_PIZZA = 2295;
+	private static final int APPLE_PIE = 2323;
+	private static final int HALF_APPLE_PIE = 2335;
 
 	private static final int DEATH_PRICE = 200;
 	private static final int CHAOS_PRICE = 80;
@@ -439,6 +443,36 @@ public class KaChingAccountingTest
 		setInventory(); // vial smashing: no vial appears
 		tick();
 		verify(overlay).add(2_600L);
+	}
+
+	@Test
+	public void firstBiteOfMultiBiteFoodBillsThePriceStep()
+	{
+		nameOf(MEAT_PIZZA, "Meat pizza");
+		nameOf(HALF_MEAT_PIZZA, "1/2 meat pizza");
+		price(MEAT_PIZZA, 400);
+		price(HALF_MEAT_PIZZA, 180);
+		setInventory(new Item(MEAT_PIZZA, 1));
+		tick();
+		clickConsume("Eat", MEAT_PIZZA);
+		setInventory(new Item(HALF_MEAT_PIZZA, 1));
+		tick();
+		verify(overlay).add(220L);
+	}
+
+	@Test
+	public void halfAnPieResidueMatchesVowelPrefix()
+	{
+		nameOf(APPLE_PIE, "Apple pie");
+		nameOf(HALF_APPLE_PIE, "Half an apple pie");
+		price(APPLE_PIE, 700);
+		price(HALF_APPLE_PIE, 320);
+		setInventory(new Item(APPLE_PIE, 1));
+		tick();
+		clickConsume("Eat", APPLE_PIE);
+		setInventory(new Item(HALF_APPLE_PIE, 1));
+		tick();
+		verify(overlay).add(380L);
 	}
 
 	@Test

@@ -25,8 +25,12 @@ Sanguinesti cast? *ka-ching.* Cannonball? *ka-ching. ka-ching. ka-ching.*
   (whichever you loaded). Picking the cannon up refunds; decay does not.
 - **Food & potions** — every bite and sip. Potion doses are priced properly:
   a sip from a Prayer potion(4) costs price((4)) − price((3)) — dose prices
-  aren't linear on the GE — and the last dose credits the empty vial you keep.
-  Gated on the actual Eat/Drink click, so dropping or banking food never rings.
+  aren't linear on the GE — and the last dose credits the empty vial you keep
+  (unless you smash it, which the plugin notices). Multi-bite foods work the
+  same way: the first bite of a pizza costs pizza − half pizza. Gated on the
+  actual Eat/Drink click, so dropping or banking food never rings.
+  Container residues (jugs, bowls, pie dishes, beer glasses) are deliberately
+  never credited — this is a negative-kaching plugin.
 
 ## How it works
 
