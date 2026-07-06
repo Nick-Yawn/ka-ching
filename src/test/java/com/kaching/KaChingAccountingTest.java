@@ -65,6 +65,9 @@ public class KaChingAccountingTest
 	private static final int DAGANNOTH_BONES = 6729;
 	private static final int CAKE = 1891;
 	private static final int TWO_THIRDS_CAKE = 1893;
+	private static final int SLICE_OF_CAKE = 1895;
+	private static final int CHOCOLATE_CAKE = 1897;
+	private static final int CHOCOLATE_SLICE = 1901;
 	private static final int MEAT_PIZZA = 2293;
 	private static final int HALF_MEAT_PIZZA = 2295;
 	private static final int APPLE_PIE = 2323;
@@ -492,6 +495,42 @@ public class KaChingAccountingTest
 		setInventory(new Item(TWO_THIRDS_CAKE, 1));
 		tick();
 		verify(overlay).add(40L);
+	}
+
+	@Test
+	public void sliceOfCakePricesAThirdOffTheCake()
+	{
+		nameOf(SLICE_OF_CAKE, "Slice of cake");
+		price(SLICE_OF_CAKE, 0);
+		price(CAKE, 120);
+		ItemPrice base = mock(ItemPrice.class);
+		when(base.getName()).thenReturn("Cake");
+		when(base.getId()).thenReturn(CAKE);
+		when(itemManager.search("cake")).thenReturn(List.of(base));
+		setInventory(new Item(SLICE_OF_CAKE, 1));
+		tick();
+		clickConsume("Eat", SLICE_OF_CAKE);
+		setInventory();
+		tick();
+		verify(overlay).add(40L);
+	}
+
+	@Test
+	public void chocolateSlicePricesAThirdOffChocolateCake()
+	{
+		nameOf(CHOCOLATE_SLICE, "Chocolate slice");
+		price(CHOCOLATE_SLICE, 0);
+		price(CHOCOLATE_CAKE, 150);
+		ItemPrice base = mock(ItemPrice.class);
+		when(base.getName()).thenReturn("Chocolate cake");
+		when(base.getId()).thenReturn(CHOCOLATE_CAKE);
+		when(itemManager.search("Chocolate cake")).thenReturn(List.of(base));
+		setInventory(new Item(CHOCOLATE_SLICE, 1));
+		tick();
+		clickConsume("Eat", CHOCOLATE_SLICE);
+		setInventory();
+		tick();
+		verify(overlay).add(50L);
 	}
 
 	@Test

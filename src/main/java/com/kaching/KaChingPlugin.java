@@ -80,7 +80,8 @@ public class KaChingPlugin extends Plugin
 		"1/2 ", 0.5,
 		"Half a ", 0.5,
 		"Half an ", 0.5,
-		"2/3 ", 1.0 / 3
+		"2/3 ", 1.0 / 3,
+		"Slice of ", 1.0 / 3
 	);
 
 	private static final Set<Integer> RUNE_IDS = Set.of(
@@ -884,6 +885,15 @@ public class KaChingPlugin extends Plugin
 					{
 						return Math.round(basePrice * prefix.getValue());
 					}
+				}
+			}
+			// "Chocolate slice" -> a third of a chocolate cake (irregular name)
+			if (name.toLowerCase().endsWith(" slice"))
+			{
+				int basePrice = exactPriceByName(name.substring(0, name.length() - " slice".length()) + " cake");
+				if (basePrice > 0)
+				{
+					return Math.round(basePrice / 3.0);
 				}
 			}
 		}
