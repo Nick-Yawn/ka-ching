@@ -53,7 +53,10 @@ public class KaChingOverlay extends Overlay
 	{
 		this.client = client;
 		setPosition(OverlayPosition.DYNAMIC);
-		setLayer(OverlayLayer.ABOVE_SCENE);
+		// Overhead prayer/skull icons are drawn by the client on top of the
+		// ABOVE_SCENE layer, so the popup has to sit on ABOVE_WIDGETS to render
+		// in front of them
+		setLayer(OverlayLayer.ABOVE_WIDGETS);
 	}
 
 	void add(long value)
