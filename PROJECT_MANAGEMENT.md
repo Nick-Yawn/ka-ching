@@ -18,11 +18,19 @@ Shipped v1. Core accounting features are implemented and covered by a test suite
 - [ ] _(add current tasks here)_
 
 ### Next / Backlog
+- [ ] Session totals — clearable/toggleable running tally (top launch-day request on Reddit)
+- [ ] Overlay customization: font color, size, placement (harmless, commonly requested)
+- [ ] Wilderness weapons — revenant ether weapons (Craw's/Webweaver, Viggora's/Ursine,
+      Thammaron's/Accursed): 1 revenant ether per attack, same detection as other charged weapons
+- [ ] Blighted spell sacks — casting from a sack consumes no runes today (silent);
+      bill the sack's GE price instead
 - [ ] Verify Plugin Hub submission / listing metadata is current
 - [ ] Expand test coverage for edge cases (Ava's recovery tiers, recharge detection)
 
 ### Later / Ideas
-- [ ] Session total / running tally overlay
+- [ ] Loss on death — bill what you just lost (fees, unprotected items). Maximum spirit-of-the-plugin
+- [ ] Ironman mode — GE prices mean nothing to irons; alternative valuation
+      (e.g. time-to-reacquire: "minutes of your life lost", per the Reddit thread)
 - [ ] Per-activity breakdown or export
 - [ ] Additional charged weapons / consumables as OSRS adds them
 - [ ] Bone Offering option
@@ -49,7 +57,7 @@ Intentional design decisions — not bugs or TODOs:
 | [KaChingOverlay.java](src/main/java/com/kaching/KaChingOverlay.java) | Floating overhead price text rendering |
 | [ChargedWeapon.java](src/main/java/com/kaching/ChargedWeapon.java) | Per-charge recipe definitions for charged weapons |
 | [KaChingAccountingTest.java](src/test/java/com/kaching/KaChingAccountingTest.java) | Accounting logic tests |
-| [KaChingPluginTest.java](src/test/java/com/kaching/KaChingPluginTest.java) | Plugin-level tests |
+| [KaChingPluginTest.java](src/test/java/com/kaching/KaChingPluginTest.java) | Dev launcher (sideloads the plugin into a local client; not a test) |
 
 ## Development
 - Build: `./gradlew build`
