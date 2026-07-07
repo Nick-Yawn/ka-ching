@@ -24,11 +24,19 @@ Shipped v1. Core accounting features are implemented and covered by a test suite
       Thammaron's/Accursed): 1 revenant ether per attack, same detection as other charged weapons
 - [ ] Blighted spell sacks — casting from a sack consumes no runes today (silent);
       bill the sack's GE price instead
+- [ ] Amulet of blood fury (requested) — burns a charge per healing proc, not per attack;
+      blood shard / 10,000 ≈ ~1k gp per proc. Neck slot + no proc animation, so the clean
+      path is the CHARGES_BLOOD_FURY_QUANTITY varbit (16151) — needs the in-game experiment
+      to confirm those charge varbits update live during combat
 - [ ] Verify Plugin Hub submission / listing metadata is current
 - [ ] Expand test coverage for edge cases (Ava's recovery tiers, recharge detection)
 
 ### Later / Ideas
 - [ ] Loss on death — bill what you just lost (fees, unprotected items). Maximum spirit-of-the-plugin
+- [ ] Maggot King "Take-eggs" (requested) — choosing eggs over the loot roll sacrifices
+      ~30k average drop value for pet odds. Design question: this bills foregone loot rather
+      than consumed items — an opportunity-cost kaching. (The boss and Crimson kisten consume
+      nothing directly; the fight otherwise works with existing trackers)
 - [ ] Ironman mode — GE prices mean nothing to irons; alternative valuation
       (e.g. time-to-reacquire: "minutes of your life lost", per the Reddit thread)
 - [ ] Per-activity breakdown or export
