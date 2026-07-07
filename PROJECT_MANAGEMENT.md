@@ -33,6 +33,11 @@ Shipped v1. Core accounting features are implemented and covered by a test suite
 
 ### Later / Ideas
 - [ ] Loss on death — bill what you just lost (fees, unprotected items). Maximum spirit-of-the-plugin
+- [ ] Skilling losses (was gated until after v1) — fletching/crafting/smithing actions where
+      outputs are worth less than inputs ring the difference. Sketch: on ticks where inventory
+      items both leave and arrive, bill max(0, value in − value out); bank/trade suppression
+      already exists. Design questions: gate on Make-X interaction vs pure diffing, per-action
+      vs per-batch pops. Doctrine-consistent: profitable crafts stay silent (negative-kaching only)
 - [ ] Maggot King "Take-eggs" (requested) — choosing eggs over the loot roll sacrifices
       ~30k average drop value for pet odds. Design question: this bills foregone loot rather
       than consumed items — an opportunity-cost kaching. (The boss and Crimson kisten consume
