@@ -1,6 +1,7 @@
 package com.kaching;
 
 import com.google.inject.Provides;
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -19,11 +20,13 @@ import net.runelite.api.GameState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
+import net.runelite.api.Skill;
 import net.runelite.api.SoundEffectID;
 import net.runelite.api.TileItem;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.CommandExecuted;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
@@ -67,11 +70,14 @@ public class KaChingPlugin extends Plugin
 	private static final int MIN_RECHARGE_CHARGES = 5;
 	// An Eat/Drink click should consume its item within this many ticks
 	private static final int CONSUME_GRACE_TICKS = 2;
-	// The requested dramatic pause between dying and the loss rolling in
-	private static final int DEATH_LOSS_DELAY_TICKS = 5;
-	// If nothing has left the inventory/equipment this long after death, it was
-	// a safe death (LMS, Inferno, poh dungeon) — everything was kept, stay silent
-	private static final int DEATH_LOSS_TIMEOUT_TICKS = 15;
+	// Respawn restores hitpoints from 0 back to full and strips the gravestone on
+	// the same tick. If that never happens within this window after death it was a
+	// safe death (LMS, Inferno, poh dungeon) — everything was kept, stay silent.
+	private static final int DEATH_LOSS_TIMEOUT_TICKS = 30;
+	// After respawn the strip lands on the respawn tick (occasionally a tick or
+	// two later). Watch this many ticks for the carried value to fall; if it never
+	// does, nothing was taken.
+	private static final int DEATH_STRIP_SETTLE_TICKS = 3;
 
 	// "Prayer potion(3)" -> a sip costs a third of the (3) price
 	private static final Pattern DOSE_SUFFIX = Pattern.compile("\\((\\d)\\)$");
@@ -189,8 +195,11 @@ public class KaChingPlugin extends Plugin
 	private final int[] prevSlotQtys = {0, 0};
 	private boolean synced;
 	private int deathCooldown;
-	private long carriedAtDeath;
 	private int deathLossTick = -1;
+	private boolean deathRespawned;
+	private int deathRespawnTick = -1;
+	private long preStripValue;
+	private long prevCarriedValue;
 	private int lastBusyTick = -1;
 	private int lastLoadingTick = -1;
 	private int lastAnimationId = -1;
@@ -263,8 +272,11 @@ public class KaChingPlugin extends Plugin
 		prevSlotQtys[0] = prevSlotQtys[1] = 0;
 		synced = false;
 		deathCooldown = 0;
-		carriedAtDeath = 0;
 		deathLossTick = -1;
+		deathRespawned = false;
+		deathRespawnTick = -1;
+		preStripValue = 0;
+		prevCarriedValue = 0;
 		lastBusyTick = -1;
 		lastLoadingTick = -1;
 		lastAnimationId = -1;
@@ -299,10 +311,11 @@ public class KaChingPlugin extends Plugin
 		{
 			deathCooldown = DEATH_COOLDOWN_TICKS;
 			pendingAmmo.clear();
-			// Items stay in their containers until the respawn teleport, so this
-			// snapshot is the full carried value at the moment of death
-			carriedAtDeath = carriedValue();
 			deathLossTick = client.getTickCount();
+			deathRespawned = false;
+			deathRespawnTick = -1;
+			// Fallback base until the first dead tick refines it (see maybeShowDeathLoss)
+			preStripValue = prevCarriedValue;
 		}
 	}
 
@@ -359,6 +372,29 @@ public class KaChingPlugin extends Plugin
 				dartItemId = dartId;
 				configManager.setConfiguration(KaChingConfig.GROUP, "dartType", dartName);
 			}
+		}
+	}
+
+	/**
+	 * Dev trigger: typing "::kcdeath 12345678" in game chat rolls in a fake
+	 * death loss at that value, so each tier's color, hold time and window
+	 * masking can be observed in-client without dying.
+	 */
+	@Subscribe
+	public void onCommandExecuted(CommandExecuted event)
+	{
+		if (!"kcdeath".equalsIgnoreCase(event.getCommand()))
+		{
+			return;
+		}
+		String[] args = event.getArguments();
+		try
+		{
+			showDeathLoss(args.length > 0 ? Long.parseLong(args[0].replace(",", "")) : 1_000_000L);
+		}
+		catch (NumberFormatException e)
+		{
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Ka-Ching: usage ::kcdeath <gp value>", null);
 		}
 	}
 
@@ -456,6 +492,7 @@ public class KaChingPlugin extends Plugin
 		}
 
 		maybeShowDeathLoss(tick);
+		prevCarriedValue = carriedValue();
 
 		prevInv = curInv;
 		prevPouch = curPouch;
@@ -948,39 +985,97 @@ public class KaChingPlugin extends Plugin
 	}
 
 	/**
-	 * Death losses are the drop in carried value between the moment of death and
-	 * the respawn: kept-on-death items never leave the containers, so the
-	 * difference is exactly what hit the floor (or the gravestone). The delay
-	 * both provides the dramatic pause and lets the respawn land — the loss is
-	 * only knowable once the server strips the containers, so the check stays
-	 * pending until value actually leaves or the timeout declares a safe death.
-	 * A bank opened mid-window would masquerade deposits as death losses, so it
-	 * cancels the pending check instead.
+	 * Death losses are what the gravestone took: the fall in carried value across the
+	 * respawn. The gravestone strips items on the tick the player respawns — never
+	 * during the death animation — so the loss is measured against the respawn, found
+	 * by hitpoints climbing off zero. Anything consumed while dying (a last-ditch bite
+	 * or sip) leaves the containers before then, so the pre-strip baseline keeps
+	 * tracking down to the real carried value and never counts it. Kept-on-death items
+	 * never leave, so a safe death (LMS, Inferno, poh dungeon) shows no drop and stays
+	 * silent; a bank opened after death empties slots too, so it cancels the pending
+	 * check instead.
 	 */
 	private void maybeShowDeathLoss(int tick)
 	{
-		if (deathLossTick == -1 || tick < deathLossTick + DEATH_LOSS_DELAY_TICKS)
+		if (deathLossTick == -1)
 		{
 			return;
 		}
 		if (lastBusyTick >= deathLossTick)
 		{
-			deathLossTick = -1;
+			clearDeathLoss();
 			return;
 		}
-		long lost = carriedAtDeath - carriedValue();
-		if (lost > 0)
+
+		if (!deathRespawned)
 		{
-			deathLossTick = -1;
-			if (config.trackDeathLoss())
+			if (client.getBoostedSkillLevel(Skill.HITPOINTS) > 0)
 			{
-				overlay.showDeathLoss(lost);
+				// Respawned: freeze the pre-strip baseline and start watching for the strip
+				deathRespawned = true;
+				deathRespawnTick = tick;
+			}
+			else
+			{
+				// Still in the death animation: the containers hold the pre-strip loadout,
+				// less anything consumed while dying — track it as the baseline
+				preStripValue = carriedValue();
+				if (tick >= deathLossTick + DEATH_LOSS_TIMEOUT_TICKS)
+				{
+					clearDeathLoss(); // never respawned (disconnect?) — give up
+				}
+				return;
 			}
 		}
-		else if (tick >= deathLossTick + DEATH_LOSS_TIMEOUT_TICKS)
+
+		long loss = preStripValue - carriedValue();
+		if (loss > 0)
 		{
-			deathLossTick = -1;
+			if (config.trackDeathLoss())
+			{
+				showDeathLoss(loss);
+			}
+			clearDeathLoss();
 		}
+		else if (tick >= deathRespawnTick + DEATH_STRIP_SETTLE_TICKS)
+		{
+			clearDeathLoss(); // respawned but nothing left — safe death, stay silent
+		}
+	}
+
+	/**
+	 * Tier styling (color and hold time) is read from config here, at the moment
+	 * the loss lands, so settings changes apply from the next death on. The
+	 * higher tier owns each boundary: a loss equal to a threshold rounds up.
+	 */
+	private void showDeathLoss(long value)
+	{
+		Color color;
+		int holdSeconds;
+		if (value >= config.deathHighThreshold())
+		{
+			color = config.deathHighColor();
+			holdSeconds = config.deathHighHold();
+		}
+		else if (value >= config.deathMediumThreshold())
+		{
+			color = config.deathMediumColor();
+			holdSeconds = config.deathMediumHold();
+		}
+		else
+		{
+			color = config.deathLowColor();
+			holdSeconds = config.deathLowHold();
+		}
+		overlay.showDeathLoss(value, color, holdSeconds * 1000);
+	}
+
+	private void clearDeathLoss()
+	{
+		deathLossTick = -1;
+		deathRespawned = false;
+		deathRespawnTick = -1;
+		preStripValue = 0;
 	}
 
 	private long carriedValue()

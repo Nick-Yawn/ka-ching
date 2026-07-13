@@ -1,5 +1,6 @@
 package com.kaching;
 
+import java.awt.Color;
 import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.List;
@@ -17,10 +18,12 @@ import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
+import net.runelite.api.Skill;
 import net.runelite.api.TileItem;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.CommandExecuted;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.ItemSpawned;
@@ -40,6 +43,7 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
@@ -74,6 +78,25 @@ public class KaChingAccountingTest
 	private static final int APPLE_PIE = 2323;
 	private static final int HALF_APPLE_PIE = 2335;
 
+	// Distinct-slot items for modelling a gravestone strip (each its own slot)
+	private static final int GEAR_A = 6001;
+	private static final int GEAR_B = 6002;
+	private static final int GEAR_C = 6003;
+	private static final int GEAR_D = 6004;
+	private static final int GEAR_E = 6005;
+	private static final int GEAR_PRICE = 1000;
+
+	// Deliberately arbitrary tier styling so the tests prove the plugin reads
+	// the values from config rather than hardcoding the defaults
+	private static final Color LOW_COLOR = new Color(1, 2, 3);
+	private static final Color MEDIUM_COLOR = new Color(4, 5, 6);
+	private static final Color HIGH_COLOR = new Color(7, 8, 9);
+	private static final int LOW_HOLD_SEC = 11;
+	private static final int MEDIUM_HOLD_SEC = 22;
+	private static final int HIGH_HOLD_SEC = 33;
+	private static final int MEDIUM_THRESHOLD = 100_000;
+	private static final int HIGH_THRESHOLD = 10_000_000;
+
 	private static final int DEATH_PRICE = 200;
 	private static final int CHAOS_PRICE = 80;
 	private static final int FIRE_PRICE = 5;
@@ -106,6 +129,7 @@ public class KaChingAccountingTest
 
 	private KaChingPlugin plugin;
 	private int tick = 100;
+	private int hp = 10; // current hitpoints: >0 alive, 0 dead (until respawn restores it)
 	private final Map<Integer, Item> equipSlots = new HashMap<>();
 
 	@Before
@@ -127,6 +151,7 @@ public class KaChingAccountingTest
 		when(client.getEnum(EnumID.RUNEPOUCH_RUNE)).thenReturn(runePouchEnum);
 		when(client.getVarbitValue(anyInt())).thenReturn(0);
 		when(client.getVarpValue(anyInt())).thenReturn(0);
+		when(client.getBoostedSkillLevel(Skill.HITPOINTS)).thenAnswer(i -> hp);
 		when(client.getWidget(anyInt(), anyInt())).thenReturn(null);
 		when(equipment.getItem(anyInt())).thenAnswer(inv -> equipSlots.get(inv.<Integer>getArgument(0)));
 		when(equipment.getItems()).thenAnswer(inv -> equipSlots.values().toArray(new Item[0]));
@@ -142,6 +167,14 @@ public class KaChingAccountingTest
 		when(config.playSound()).thenReturn(false);
 		when(config.minValue()).thenReturn(1);
 		when(config.avasDevice()).thenReturn(KaChingConfig.AvasDevice.AUTO_DETECT);
+		when(config.deathLowColor()).thenReturn(LOW_COLOR);
+		when(config.deathMediumColor()).thenReturn(MEDIUM_COLOR);
+		when(config.deathHighColor()).thenReturn(HIGH_COLOR);
+		when(config.deathLowHold()).thenReturn(LOW_HOLD_SEC);
+		when(config.deathMediumHold()).thenReturn(MEDIUM_HOLD_SEC);
+		when(config.deathHighHold()).thenReturn(HIGH_HOLD_SEC);
+		when(config.deathMediumThreshold()).thenReturn(MEDIUM_THRESHOLD);
+		when(config.deathHighThreshold()).thenReturn(HIGH_THRESHOLD);
 
 		price(ItemID.DEATHRUNE, DEATH_PRICE);
 		price(ItemID.CHAOSRUNE, CHAOS_PRICE);
@@ -151,6 +184,10 @@ public class KaChingAccountingTest
 		price(ItemID.BLOODRUNE, BLOOD_PRICE);
 		price(ItemID.VIAL_BLOOD, VIAL_PRICE);
 		price(ItemID.SNAKEBOSS_SCALE, SCALE_PRICE);
+		for (int gear : new int[]{GEAR_A, GEAR_B, GEAR_C, GEAR_D, GEAR_E})
+		{
+			price(gear, GEAR_PRICE);
+		}
 
 		plugin.startUp();
 		tick(); // first tick only syncs snapshots
@@ -599,94 +636,225 @@ public class KaChingAccountingTest
 	// ---- death losses ----
 
 	@Test
-	public void deathLossRollsInAfterTheDelay()
+	public void deathLossRollsInAfterRespawn()
 	{
-		price(SHARK, 800);
-		setInventory(new Item(SHARK, 10));
+		// Full loadout, keep one item on respawn: the gravestone strips four items
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1), new Item(GEAR_C, 1),
+			new Item(GEAR_D, 1), new Item(GEAR_E, 1));
 		tick();
 		die();
-		setInventory(new Item(SHARK, 3)); // respawn: kept 3 of 10
-		ticks(4);
-		verify(overlay, never()).showDeathLoss(anyLong());
-		tick(); // 5 ticks (3s) after death
-		verify(overlay).showDeathLoss(7L * 800);
+		tick(); // death animation: still carrying the full loadout, no respawn yet
+		verify(overlay, never()).showDeathLoss(anyLong(), any(), anyInt());
+		respawn();
+		setInventory(new Item(GEAR_E, 1)); // gravestone strips four items on the respawn tick
+		tick();
+		verify(overlay).showDeathLoss(4L * GEAR_PRICE, LOW_COLOR, LOW_HOLD_SEC * 1000);
+	}
+
+	@Test
+	public void lowSlotDeathLosingMostOfYourValueIsShown()
+	{
+		// Two items, lose the valuable one and keep the cheap one: measured across
+		// the respawn, so it needs no slot heuristic (the real-world case)
+		price(GEAR_A, 2037);
+		price(GEAR_B, 5);
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1));
+		tick();
+		die();
+		tick(); // death animation
+		respawn();
+		setInventory(new Item(GEAR_B, 1)); // kept only the 5 gp item
+		tick();
+		verify(overlay).showDeathLoss(2037L, LOW_COLOR, LOW_HOLD_SEC * 1000);
+	}
+
+	@Test
+	public void consumptionWhileDyingIsNotCountedAsDeathLoss()
+	{
+		// The log case: a valuable item is eaten on the death tick, then respawn
+		// keeps the cheap one. The 2037 was consumed, not sent to the grave, so the
+		// pre-strip baseline tracks down past it and the death shows nothing.
+		price(GEAR_A, 2037);
+		price(GEAR_B, 5);
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1));
+		tick();
+		die();
+		setInventory(new Item(GEAR_B, 1)); // ate the 2037 item as you died
+		tick(); // dead: baseline falls to the post-consumption 5 gp
+		respawn(); // gravestone has nothing left to take
+		ticks(5);
+		verify(overlay, never()).showDeathLoss(anyLong(), any(), anyInt());
 	}
 
 	@Test
 	public void lostEquipmentCountsTowardDeathLoss()
 	{
+		setEquip(WEAPON_SLOT, new Item(GEAR_A, 1));
 		setEquip(AMMO_SLOT, new Item(ARROW, 100));
+		setInventory(new Item(GEAR_B, 1), new Item(GEAR_C, 1));
 		tick();
 		die();
-		equipSlots.remove(AMMO_SLOT);
-		ticks(5);
-		verify(overlay).showDeathLoss(100L * ARROW_PRICE);
+		tick(); // death animation
+		respawn();
+		equipSlots.clear();
+		setInventory(); // strip empties two equipment + two inventory slots
+		tick();
+		verify(overlay).showDeathLoss((long) GEAR_PRICE + 100L * ARROW_PRICE + 2L * GEAR_PRICE,
+			LOW_COLOR, LOW_HOLD_SEC * 1000);
 		verify(overlay, never()).add(anyLong()); // not double-billed as broken ammo
 	}
 
 	@Test
 	public void safeDeathStaysSilent()
 	{
-		price(SHARK, 800);
-		setInventory(new Item(SHARK, 10));
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1), new Item(GEAR_C, 1), new Item(GEAR_D, 1));
 		tick();
 		die();
-		ticks(20); // nothing ever leaves the containers
-		verify(overlay, never()).showDeathLoss(anyLong());
+		tick(); // death animation
+		respawn(); // everything kept — no gravestone strip
+		ticks(4);
+		verify(overlay, never()).showDeathLoss(anyLong(), any(), anyInt());
 	}
 
 	@Test
 	public void lateRespawnStillShowsTheLoss()
 	{
-		price(SHARK, 800);
-		setInventory(new Item(SHARK, 10));
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1), new Item(GEAR_C, 1),
+			new Item(GEAR_D, 1), new Item(GEAR_E, 1));
 		tick();
 		die();
-		ticks(8); // still dead, containers untouched
-		verify(overlay, never()).showDeathLoss(anyLong());
-		setInventory(); // respawn finally strips everything
+		ticks(8); // a long death animation — still dead, containers untouched
+		verify(overlay, never()).showDeathLoss(anyLong(), any(), anyInt());
+		respawn();
+		setInventory(new Item(GEAR_E, 1)); // strip lands on the (late) respawn tick
 		tick();
-		verify(overlay).showDeathLoss(8_000L);
+		verify(overlay).showDeathLoss(4L * GEAR_PRICE, LOW_COLOR, LOW_HOLD_SEC * 1000);
 	}
 
 	@Test
 	public void bankOpenedAfterDeathCancelsTheCheck()
 	{
-		price(SHARK, 800);
-		setInventory(new Item(SHARK, 10));
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1), new Item(GEAR_C, 1), new Item(GEAR_D, 1));
 		tick();
 		die();
 		Widget bank = mock(Widget.class);
 		when(client.getWidget(InterfaceID.BANKMAIN, 0)).thenReturn(bank);
-		tick();
-		setInventory(); // deposits, not death losses
+		tick(); // bank open the tick after death
+		respawn();
+		setInventory(); // a big deposit empties slots, but it is not a gravestone strip
 		ticks(10);
-		verify(overlay, never()).showDeathLoss(anyLong());
+		verify(overlay, never()).showDeathLoss(anyLong(), any(), anyInt());
 	}
 
 	@Test
 	public void deathLossToggleOffStaysSilent()
 	{
 		when(config.trackDeathLoss()).thenReturn(false);
-		price(SHARK, 800);
-		setInventory(new Item(SHARK, 10));
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1), new Item(GEAR_C, 1), new Item(GEAR_D, 1));
 		tick();
 		die();
+		tick(); // death animation
+		respawn();
 		setInventory();
-		ticks(6);
-		verify(overlay, never()).showDeathLoss(anyLong());
+		ticks(2);
+		verify(overlay, never()).showDeathLoss(anyLong(), any(), anyInt());
 	}
 
 	@Test
 	public void anotherActorsDeathDoesNotArm()
 	{
-		price(SHARK, 800);
-		setInventory(new Item(SHARK, 10));
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1), new Item(GEAR_C, 1), new Item(GEAR_D, 1));
 		tick();
 		plugin.onActorDeath(new ActorDeath(mock(Actor.class)));
-		setInventory();
+		setInventory(); // slots empty, but no local death was armed
 		ticks(6);
-		verify(overlay, never()).showDeathLoss(anyLong());
+		verify(overlay, never()).showDeathLoss(anyLong(), any(), anyInt());
+	}
+
+	// ---- death loss tiers ----
+
+	/** Dies keeping a 5 gp item, so the loss across the respawn is exactly {@code value}. */
+	private void dieLosing(int value)
+	{
+		price(GEAR_A, value);
+		price(GEAR_B, 5);
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1));
+		tick();
+		die();
+		tick(); // death animation
+		respawn();
+		setInventory(new Item(GEAR_B, 1)); // gravestone takes GEAR_A
+		tick();
+	}
+
+	@Test
+	public void lossBelowMediumThresholdIsLowTier()
+	{
+		dieLosing(MEDIUM_THRESHOLD - 1);
+		verify(overlay).showDeathLoss(MEDIUM_THRESHOLD - 1L, LOW_COLOR, LOW_HOLD_SEC * 1000);
+	}
+
+	@Test
+	public void lossExactlyAtMediumThresholdIsMediumTier()
+	{
+		// the higher tier owns the boundary: equality goes up
+		dieLosing(MEDIUM_THRESHOLD);
+		verify(overlay).showDeathLoss((long) MEDIUM_THRESHOLD, MEDIUM_COLOR, MEDIUM_HOLD_SEC * 1000);
+	}
+
+	@Test
+	public void lossExactlyAtHighThresholdIsHighTier()
+	{
+		dieLosing(HIGH_THRESHOLD);
+		verify(overlay).showDeathLoss((long) HIGH_THRESHOLD, HIGH_COLOR, HIGH_HOLD_SEC * 1000);
+	}
+
+	@Test
+	public void lossAboveHighThresholdIsHighTier()
+	{
+		dieLosing(HIGH_THRESHOLD + 1);
+		verify(overlay).showDeathLoss(HIGH_THRESHOLD + 1L, HIGH_COLOR, HIGH_HOLD_SEC * 1000);
+	}
+
+	@Test
+	public void tinyLossStillShowsWithoutAFloor()
+	{
+		// No floor: losing anything at all to the grave rolls in (low tier here)
+		for (int gear : new int[]{GEAR_A, GEAR_B, GEAR_C, GEAR_D})
+		{
+			price(gear, 1);
+		}
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1), new Item(GEAR_C, 1), new Item(GEAR_D, 1));
+		tick();
+		die();
+		tick(); // death animation
+		respawn();
+		setInventory(); // four 1 gp items stripped — a 4 gp loss
+		tick();
+		verify(overlay).showDeathLoss(4L, LOW_COLOR, LOW_HOLD_SEC * 1000);
+	}
+
+	@Test
+	public void tierSettingsAreReadWhenTheLossLands()
+	{
+		setInventory(new Item(GEAR_A, 1), new Item(GEAR_B, 1), new Item(GEAR_C, 1), new Item(GEAR_D, 1));
+		tick();
+		// settings changed after startup still style the next death
+		when(config.deathLowColor()).thenReturn(Color.CYAN);
+		when(config.deathLowHold()).thenReturn(60);
+		die();
+		tick(); // death animation
+		respawn();
+		setInventory();
+		tick();
+		verify(overlay).showDeathLoss(4L * GEAR_PRICE, Color.CYAN, 60_000);
+	}
+
+	@Test
+	public void devCommandFiresAFakeLossAtTheChosenValue()
+	{
+		plugin.onCommandExecuted(new CommandExecuted("kcdeath", new String[]{"25000000"}));
+		verify(overlay).showDeathLoss(25_000_000L, HIGH_COLOR, HIGH_HOLD_SEC * 1000);
 	}
 
 	// ---- harness ----
@@ -739,7 +907,13 @@ public class KaChingAccountingTest
 
 	private void die()
 	{
+		hp = 0; // hitpoints hit zero — dead until respawn
 		plugin.onActorDeath(new ActorDeath(localPlayer));
+	}
+
+	private void respawn()
+	{
+		hp = 10; // hitpoints restored on respawn; the gravestone strips the same tick
 	}
 
 	private void spawnGroundItem(int itemId, int quantity, int ownership)

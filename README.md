@@ -26,8 +26,10 @@ Trident casts? Cannonballs? *ka-ching. ka-ching. ka-ching.*
 - **Bones** — burying them straight into the dirt rings at the full GE price. Altar
   offerings and other methods stay silent.
 - **Deaths** — three seconds after you die, the GE value of everything you lost rolls
-  in overhead in red, hangs there for a minute, then rolls away. Items kept on death
-  don't count, and safe deaths (LMS, Inferno) stay silent.
+  in overhead, hangs there, then rolls away. Color and hang time scale with the damage:
+  pale orange under 100k (15s), dark orange to 10m (25s), red beyond (45s) — every
+  color, duration and boundary is configurable. Items kept on death don't count, and
+  safe deaths (LMS, Inferno) stay silent.
 
 ## How it works
 
@@ -71,6 +73,8 @@ and it's remembered. If you unload and switch dart types, Check again.
 
 - Independent toggles: spells, ranged ammo, charged weapons, cannon, food/potions/bones,
   death losses
+- Death loss tiers: color and on-screen time per severity, plus the two value
+  boundaries that separate them
 - Ava's device override for blowpipe dart math
 - Coin jingle on/off and volume
 - Minimum gp value to trigger (mute the 15 gp Wind Strikes, keep the barrages)
@@ -86,8 +90,11 @@ and it's remembered. If you unload and switch dart types, Check again.
   goes silent after an update, the table needs a refresh.
 - Trades, banking, GE, and shops are filtered out and won't ka-ching; regular per-item
   tracking also pauses around a death so the loss isn't double-billed.
-- The death loss is whatever's missing when you respawn: items sent to a gravestone
-  count as lost even though you can buy them back.
+- The death loss is measured across your respawn (found by hitpoints climbing back off
+  zero): the drop in carried value from the death animation to what you get up with.
+  Anything eaten or drunk while dying is excluded, and any value the gravestone takes —
+  however small — rolls in. Items sent to a gravestone count as lost even though you can
+  buy them back.
 
 ## Running
 
@@ -96,3 +103,9 @@ and it's remembered. If you unload and switch dart types, Check again.
 ```
 
 Builds the shadow JAR and launches RuneLite with the plugin loaded.
+
+To exercise the death-loss overlay without dying, type `::kcdeath <gp value>` in game
+chat — e.g. `::kcdeath 99999` (low tier), `::kcdeath 100000` (medium), and
+`::kcdeath 10000000` (high) — and watch the text roll up into place over 3s, hold in
+its tier's color for its tier's duration, then roll up and away over 3s, staying
+masked outside its one-line window at both ends.

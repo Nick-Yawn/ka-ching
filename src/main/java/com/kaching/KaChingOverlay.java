@@ -2,7 +2,10 @@ package com.kaching;
 
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
+import java.awt.Shape;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -30,16 +33,19 @@ public class KaChingOverlay extends Overlay
 	private static final int RISE_PX = 100;
 	private static final Color COIN_GOLD = new Color(255, 215, 0);
 
-	// Death loss: rolls up into place over 3s, hangs overhead for 60s, then
-	// rolls away upward over 3s, fading symmetrically at both ends
+	// Death loss: rolls up into place over 3s, hangs overhead for its tier's
+	// configured hold, then rolls away upward over 3s, fading symmetrically at
+	// both ends
 	private static final int DEATH_SCROLL_MS = 3000;
-	private static final int DEATH_HOLD_MS = 60_000;
-	private static final Color LOSS_RED = Color.RED;
+	// World-space height above the player that anchors the resting loss clear of the
+	// head. Projected every frame, so the drop stays fixed relative to the character
+	// as the camera moves (vs the gold drops' +40, which sits right at head height).
+	private static final int DEATH_HEAD_OFFSET = 120;
 
 	private final Client client;
 	private final List<Drop> drops = new ArrayList<>();
 	// Reference swap is the only mutation, so volatile suffices across threads
-	private volatile Drop deathDrop;
+	private volatile DeathDrop deathDrop;
 
 	private static class Drop
 	{
@@ -56,15 +62,30 @@ public class KaChingOverlay extends Overlay
 		}
 	}
 
+	// Tier styling is resolved by the plugin when the death lands, so a config
+	// change takes effect on the next death, not the one already on screen
+	private static class DeathDrop extends Drop
+	{
+		final Color color;
+		final int holdMs;
+
+		DeathDrop(String text, int zOffset, Color color, int holdMs)
+		{
+			super(text, zOffset);
+			this.color = color;
+			this.holdMs = holdMs;
+		}
+	}
+
 	@Inject
 	KaChingOverlay(Client client)
 	{
 		this.client = client;
 		setPosition(OverlayPosition.DYNAMIC);
-		// Overhead prayer/skull icons are drawn by the client on top of the
-		// ABOVE_SCENE layer, so the popup has to sit on ABOVE_WIDGETS to render
-		// in front of them
-		setLayer(OverlayLayer.ABOVE_WIDGETS);
+		// UNDER_WIDGETS renders in drawAboveOverheads(): after the client's
+		// overhead prayer/skull icons (so the popup sits in front of them) but
+		// before widgets and the right-click menu (so the menu draws over it).
+		setLayer(OverlayLayer.UNDER_WIDGETS);
 	}
 
 	void add(long value)
@@ -78,11 +99,11 @@ public class KaChingOverlay extends Overlay
 	}
 
 	/** A new death replaces any loss still hanging from a previous one. */
-	void showDeathLoss(long value)
+	void showDeathLoss(long value, Color color, int holdMs)
 	{
 		Player player = client.getLocalPlayer();
-		int zOffset = (player != null ? player.getLogicalHeight() : 220) + 40;
-		deathDrop = new Drop("-" + QuantityFormatter.formatNumber(value) + " gp", zOffset);
+		int zOffset = (player != null ? player.getLogicalHeight() : 220) + DEATH_HEAD_OFFSET;
+		deathDrop = new DeathDrop("-" + QuantityFormatter.formatNumber(value) + " gp", zOffset, color, holdMs);
 	}
 
 	void clear()
@@ -145,21 +166,26 @@ public class KaChingOverlay extends Overlay
 
 	private void renderDeathLoss(Graphics2D graphics, Player player, long now)
 	{
-		Drop death = deathDrop;
+		DeathDrop death = deathDrop;
 		if (death == null)
 		{
 			return;
 		}
 		long elapsed = now - death.startMs;
-		if (elapsed >= (long) DEATH_SCROLL_MS + DEATH_HOLD_MS + DEATH_SCROLL_MS)
+		if (elapsed >= (long) DEATH_SCROLL_MS + death.holdMs + DEATH_SCROLL_MS)
 		{
 			deathDrop = null;
 			return;
 		}
 
+		if (client.isMenuOpen())
+		{
+			return; // keep the loss pending, but don't paint over an open menu
+		}
+
 		// in/out each ramp 0->1 across their own 3s scroll window
 		float in = Math.min(1f, elapsed / (float) DEATH_SCROLL_MS);
-		float out = Math.max(0f, (elapsed - DEATH_SCROLL_MS - DEATH_HOLD_MS) / (float) DEATH_SCROLL_MS);
+		float out = Math.max(0f, (elapsed - DEATH_SCROLL_MS - death.holdMs) / (float) DEATH_SCROLL_MS);
 
 		Point base = Perspective.getCanvasTextLocation(
 			client, graphics, player.getLocalLocation(), death.text, death.zOffset);
@@ -168,14 +194,44 @@ public class KaChingOverlay extends Overlay
 			return;
 		}
 
+		// Anchored in world space a fixed height above the head (re-projected each
+		// frame), so the resting loss stays put relative to the character as the
+		// camera moves.
+		FontMetrics fm = graphics.getFontMetrics();
+		int band = fm.getHeight(); // one text line — the height of every section
+		int restY = base.getY();
 		int x = base.getX();
-		// Rolls up from below into place, holds, then keeps rolling up and away
-		int y = base.getY() + (int) ((1f - in) * RISE_PX) - (int) (out * RISE_PX);
+		// Three stacked sections, each one band tall: a blocked lower bound, the
+		// visible display window (where the loss rests), and a blocked overflow above.
+		// The text moves exactly one band per phase, so it originates hidden in the
+		// lower bound, scrolls up into the display window to rest, then scrolls up and
+		// out into the overflow — fully legible the whole time it crosses the window.
+		int y = restY + (int) ((1f - in) * band) - (int) (out * band);
 		int alpha = (int) (255 * Math.min(in, 1f - out));
+
+		Rectangle clipBounds = graphics.getClipBounds();
+		Shape prevClip = graphics.getClip();
+		boolean masked = clipBounds != null;
+		if (masked)
+		{
+			// Reveal only the display window; the lower bound and overflow stay blocked
+			int windowTop = Math.max(clipBounds.y, restY - fm.getAscent());
+			int windowBottom = Math.min(clipBounds.y + clipBounds.height, restY - fm.getAscent() + band);
+			if (windowBottom <= windowTop)
+			{
+				return; // the display window is off-screen — nothing to show
+			}
+			graphics.setClip(clipBounds.x, windowTop, clipBounds.width, windowBottom - windowTop);
+		}
 
 		graphics.setColor(new Color(0, 0, 0, alpha));
 		graphics.drawString(death.text, x + 1, y + 1);
-		graphics.setColor(new Color(LOSS_RED.getRed(), LOSS_RED.getGreen(), LOSS_RED.getBlue(), alpha));
+		graphics.setColor(new Color(death.color.getRed(), death.color.getGreen(), death.color.getBlue(), alpha));
 		graphics.drawString(death.text, x, y);
+
+		if (masked)
+		{
+			graphics.setClip(prevClip);
+		}
 	}
 }
