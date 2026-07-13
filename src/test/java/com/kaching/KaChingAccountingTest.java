@@ -18,6 +18,7 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
 import net.runelite.api.TileItem;
+import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
@@ -128,6 +129,7 @@ public class KaChingAccountingTest
 		when(client.getVarpValue(anyInt())).thenReturn(0);
 		when(client.getWidget(anyInt(), anyInt())).thenReturn(null);
 		when(equipment.getItem(anyInt())).thenAnswer(inv -> equipSlots.get(inv.<Integer>getArgument(0)));
+		when(equipment.getItems()).thenAnswer(inv -> equipSlots.values().toArray(new Item[0]));
 		when(itemManager.search(org.mockito.ArgumentMatchers.anyString())).thenReturn(List.of());
 		setInventory();
 
@@ -136,6 +138,7 @@ public class KaChingAccountingTest
 		when(config.trackChargedWeapons()).thenReturn(true);
 		when(config.trackCannon()).thenReturn(true);
 		when(config.trackConsumables()).thenReturn(true);
+		when(config.trackDeathLoss()).thenReturn(true);
 		when(config.playSound()).thenReturn(false);
 		when(config.minValue()).thenReturn(1);
 		when(config.avasDevice()).thenReturn(KaChingConfig.AvasDevice.AUTO_DETECT);
@@ -593,6 +596,99 @@ public class KaChingAccountingTest
 		verify(overlay, never()).add(anyLong());
 	}
 
+	// ---- death losses ----
+
+	@Test
+	public void deathLossRollsInAfterTheDelay()
+	{
+		price(SHARK, 800);
+		setInventory(new Item(SHARK, 10));
+		tick();
+		die();
+		setInventory(new Item(SHARK, 3)); // respawn: kept 3 of 10
+		ticks(4);
+		verify(overlay, never()).showDeathLoss(anyLong());
+		tick(); // 5 ticks (3s) after death
+		verify(overlay).showDeathLoss(7L * 800);
+	}
+
+	@Test
+	public void lostEquipmentCountsTowardDeathLoss()
+	{
+		setEquip(AMMO_SLOT, new Item(ARROW, 100));
+		tick();
+		die();
+		equipSlots.remove(AMMO_SLOT);
+		ticks(5);
+		verify(overlay).showDeathLoss(100L * ARROW_PRICE);
+		verify(overlay, never()).add(anyLong()); // not double-billed as broken ammo
+	}
+
+	@Test
+	public void safeDeathStaysSilent()
+	{
+		price(SHARK, 800);
+		setInventory(new Item(SHARK, 10));
+		tick();
+		die();
+		ticks(20); // nothing ever leaves the containers
+		verify(overlay, never()).showDeathLoss(anyLong());
+	}
+
+	@Test
+	public void lateRespawnStillShowsTheLoss()
+	{
+		price(SHARK, 800);
+		setInventory(new Item(SHARK, 10));
+		tick();
+		die();
+		ticks(8); // still dead, containers untouched
+		verify(overlay, never()).showDeathLoss(anyLong());
+		setInventory(); // respawn finally strips everything
+		tick();
+		verify(overlay).showDeathLoss(8_000L);
+	}
+
+	@Test
+	public void bankOpenedAfterDeathCancelsTheCheck()
+	{
+		price(SHARK, 800);
+		setInventory(new Item(SHARK, 10));
+		tick();
+		die();
+		Widget bank = mock(Widget.class);
+		when(client.getWidget(InterfaceID.BANKMAIN, 0)).thenReturn(bank);
+		tick();
+		setInventory(); // deposits, not death losses
+		ticks(10);
+		verify(overlay, never()).showDeathLoss(anyLong());
+	}
+
+	@Test
+	public void deathLossToggleOffStaysSilent()
+	{
+		when(config.trackDeathLoss()).thenReturn(false);
+		price(SHARK, 800);
+		setInventory(new Item(SHARK, 10));
+		tick();
+		die();
+		setInventory();
+		ticks(6);
+		verify(overlay, never()).showDeathLoss(anyLong());
+	}
+
+	@Test
+	public void anotherActorsDeathDoesNotArm()
+	{
+		price(SHARK, 800);
+		setInventory(new Item(SHARK, 10));
+		tick();
+		plugin.onActorDeath(new ActorDeath(mock(Actor.class)));
+		setInventory();
+		ticks(6);
+		verify(overlay, never()).showDeathLoss(anyLong());
+	}
+
 	// ---- harness ----
 
 	private void inject(String field, Object value) throws Exception
@@ -639,6 +735,11 @@ public class KaChingAccountingTest
 		{
 			tick();
 		}
+	}
+
+	private void die()
+	{
+		plugin.onActorDeath(new ActorDeath(localPlayer));
 	}
 
 	private void spawnGroundItem(int itemId, int quantity, int ownership)

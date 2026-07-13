@@ -66,10 +66,21 @@ public interface KaChingConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "trackDeathLoss",
+		name = "Track death losses",
+		description = "After you die, show the GE value of everything you lost in red over your head for a minute",
+		position = 5
+	)
+	default boolean trackDeathLoss()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "avasDevice",
 		name = "Ava's device",
 		description = "Dart recovery for blowpipe cost estimates. Auto-detect reads your cape slot; override if using an untracked cape",
-		position = 5
+		position = 6
 	)
 	default AvasDevice avasDevice()
 	{
@@ -80,7 +91,7 @@ public interface KaChingConfig extends Config
 		keyName = "playSound",
 		name = "Coin jingle",
 		description = "Play the GE coin jingle when money burns",
-		position = 6
+		position = 7
 	)
 	default boolean playSound()
 	{
@@ -92,7 +103,7 @@ public interface KaChingConfig extends Config
 		keyName = "soundVolume",
 		name = "Jingle volume",
 		description = "Volume of the coin jingle (1-127)",
-		position = 7
+		position = 8
 	)
 	default int soundVolume()
 	{
@@ -103,7 +114,7 @@ public interface KaChingConfig extends Config
 		keyName = "minValue",
 		name = "Minimum value",
 		description = "Only ka-ching for at least this many gp",
-		position = 8
+		position = 9
 	)
 	default int minValue()
 	{

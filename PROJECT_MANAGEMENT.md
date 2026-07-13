@@ -32,7 +32,6 @@ Shipped v1. Core accounting features are implemented and covered by a test suite
 - [ ] Expand test coverage for edge cases (Ava's recovery tiers, recharge detection)
 
 ### Later / Ideas
-- [ ] Loss on death — bill what you just lost (fees, unprotected items). Maximum spirit-of-the-plugin
 - [ ] Skilling losses (was gated until after v1) — fletching/crafting/smithing actions where
       outputs are worth less than inputs ring the difference. Sketch: on ticks where inventory
       items both leave and arrive, bill max(0, value in − value out); bank/trade suppression
@@ -49,6 +48,8 @@ Shipped v1. Core accounting features are implemented and covered by a test suite
 - [ ] Bone Offering option
 
 ## Done
+- [x] Loss on death — carried-value diff across the respawn, shown in red overhead
+      (3s pause, 3s roll-in, 60s hold, 3s roll-away)
 - [x] v1 release: overhead GE pricing for spells, ammo, charged weapons, cannon
 - [x] Food & potion per-dose pricing (pro-rated multi-bite foods, dose step-down)
 - [x] Buried-bones pricing

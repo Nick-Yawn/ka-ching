@@ -46,8 +46,8 @@ import net.runelite.client.util.Text;
 
 @PluginDescriptor(
 	name = "Ka-Ching!",
-	description = "Shows the GE price of every spell cast, broken ammo, weapon charge, cannonball, bite, sip and buried bone, with a coin jingle",
-	tags = {"kaching", "meme", "money", "cost", "gp", "price", "ge", "sound", "jingle", "ammo", "runes", "blowpipe", "cannon", "food", "potions", "bones"}
+	description = "Shows the GE price of every spell cast, broken ammo, weapon charge, cannonball, bite, sip and buried bone — plus what a death cost you — with a coin jingle",
+	tags = {"kaching", "meme", "money", "cost", "gp", "price", "ge", "sound", "jingle", "ammo", "runes", "blowpipe", "cannon", "food", "potions", "bones", "death"}
 )
 public class KaChingPlugin extends Plugin
 {
@@ -67,6 +67,11 @@ public class KaChingPlugin extends Plugin
 	private static final int MIN_RECHARGE_CHARGES = 5;
 	// An Eat/Drink click should consume its item within this many ticks
 	private static final int CONSUME_GRACE_TICKS = 2;
+	// The requested dramatic pause between dying and the loss rolling in
+	private static final int DEATH_LOSS_DELAY_TICKS = 5;
+	// If nothing has left the inventory/equipment this long after death, it was
+	// a safe death (LMS, Inferno, poh dungeon) — everything was kept, stay silent
+	private static final int DEATH_LOSS_TIMEOUT_TICKS = 15;
 
 	// "Prayer potion(3)" -> a sip costs a third of the (3) price
 	private static final Pattern DOSE_SUFFIX = Pattern.compile("\\((\\d)\\)$");
@@ -184,6 +189,8 @@ public class KaChingPlugin extends Plugin
 	private final int[] prevSlotQtys = {0, 0};
 	private boolean synced;
 	private int deathCooldown;
+	private long carriedAtDeath;
+	private int deathLossTick = -1;
 	private int lastBusyTick = -1;
 	private int lastLoadingTick = -1;
 	private int lastAnimationId = -1;
@@ -256,6 +263,8 @@ public class KaChingPlugin extends Plugin
 		prevSlotQtys[0] = prevSlotQtys[1] = 0;
 		synced = false;
 		deathCooldown = 0;
+		carriedAtDeath = 0;
+		deathLossTick = -1;
 		lastBusyTick = -1;
 		lastLoadingTick = -1;
 		lastAnimationId = -1;
@@ -290,6 +299,10 @@ public class KaChingPlugin extends Plugin
 		{
 			deathCooldown = DEATH_COOLDOWN_TICKS;
 			pendingAmmo.clear();
+			// Items stay in their containers until the respawn teleport, so this
+			// snapshot is the full carried value at the moment of death
+			carriedAtDeath = carriedValue();
+			deathLossTick = client.getTickCount();
 		}
 	}
 
@@ -441,6 +454,8 @@ public class KaChingPlugin extends Plugin
 		{
 			kaching(value);
 		}
+
+		maybeShowDeathLoss(tick);
 
 		prevInv = curInv;
 		prevPouch = curPouch;
@@ -930,6 +945,65 @@ public class KaChingPlugin extends Plugin
 	{
 		// Coins aren't GE-tradeable; 1 gp is 1 gp
 		return itemId == ItemID.COINS ? 1 : itemManager.getItemPrice(itemId);
+	}
+
+	/**
+	 * Death losses are the drop in carried value between the moment of death and
+	 * the respawn: kept-on-death items never leave the containers, so the
+	 * difference is exactly what hit the floor (or the gravestone). The delay
+	 * both provides the dramatic pause and lets the respawn land — the loss is
+	 * only knowable once the server strips the containers, so the check stays
+	 * pending until value actually leaves or the timeout declares a safe death.
+	 * A bank opened mid-window would masquerade deposits as death losses, so it
+	 * cancels the pending check instead.
+	 */
+	private void maybeShowDeathLoss(int tick)
+	{
+		if (deathLossTick == -1 || tick < deathLossTick + DEATH_LOSS_DELAY_TICKS)
+		{
+			return;
+		}
+		if (lastBusyTick >= deathLossTick)
+		{
+			deathLossTick = -1;
+			return;
+		}
+		long lost = carriedAtDeath - carriedValue();
+		if (lost > 0)
+		{
+			deathLossTick = -1;
+			if (config.trackDeathLoss())
+			{
+				overlay.showDeathLoss(lost);
+			}
+		}
+		else if (tick >= deathLossTick + DEATH_LOSS_TIMEOUT_TICKS)
+		{
+			deathLossTick = -1;
+		}
+	}
+
+	private long carriedValue()
+	{
+		return containerValue(client.getItemContainer(InventoryID.INV))
+			+ containerValue(client.getItemContainer(InventoryID.WORN));
+	}
+
+	private long containerValue(ItemContainer container)
+	{
+		if (container == null)
+		{
+			return 0;
+		}
+		long value = 0;
+		for (Item item : container.getItems())
+		{
+			if (item.getId() != -1)
+			{
+				value += (long) priceOf(item.getId()) * item.getQuantity();
+			}
+		}
+		return value;
 	}
 
 	private void kaching(long value)

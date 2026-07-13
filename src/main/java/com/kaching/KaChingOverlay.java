@@ -30,8 +30,16 @@ public class KaChingOverlay extends Overlay
 	private static final int RISE_PX = 100;
 	private static final Color COIN_GOLD = new Color(255, 215, 0);
 
+	// Death loss: rolls up into place over 3s, hangs overhead for 60s, then
+	// rolls away upward over 3s, fading symmetrically at both ends
+	private static final int DEATH_SCROLL_MS = 3000;
+	private static final int DEATH_HOLD_MS = 60_000;
+	private static final Color LOSS_RED = Color.RED;
+
 	private final Client client;
 	private final List<Drop> drops = new ArrayList<>();
+	// Reference swap is the only mutation, so volatile suffices across threads
+	private volatile Drop deathDrop;
 
 	private static class Drop
 	{
@@ -69,8 +77,17 @@ public class KaChingOverlay extends Overlay
 		}
 	}
 
+	/** A new death replaces any loss still hanging from a previous one. */
+	void showDeathLoss(long value)
+	{
+		Player player = client.getLocalPlayer();
+		int zOffset = (player != null ? player.getLogicalHeight() : 220) + 40;
+		deathDrop = new Drop("-" + QuantityFormatter.formatNumber(value) + " gp", zOffset);
+	}
+
 	void clear()
 	{
+		deathDrop = null;
 		synchronized (drops)
 		{
 			drops.clear();
@@ -121,6 +138,44 @@ public class KaChingOverlay extends Overlay
 				graphics.drawString(drop.text, x, y);
 			}
 		}
+
+		renderDeathLoss(graphics, player, now);
 		return null;
+	}
+
+	private void renderDeathLoss(Graphics2D graphics, Player player, long now)
+	{
+		Drop death = deathDrop;
+		if (death == null)
+		{
+			return;
+		}
+		long elapsed = now - death.startMs;
+		if (elapsed >= (long) DEATH_SCROLL_MS + DEATH_HOLD_MS + DEATH_SCROLL_MS)
+		{
+			deathDrop = null;
+			return;
+		}
+
+		// in/out each ramp 0->1 across their own 3s scroll window
+		float in = Math.min(1f, elapsed / (float) DEATH_SCROLL_MS);
+		float out = Math.max(0f, (elapsed - DEATH_SCROLL_MS - DEATH_HOLD_MS) / (float) DEATH_SCROLL_MS);
+
+		Point base = Perspective.getCanvasTextLocation(
+			client, graphics, player.getLocalLocation(), death.text, death.zOffset);
+		if (base == null)
+		{
+			return;
+		}
+
+		int x = base.getX();
+		// Rolls up from below into place, holds, then keeps rolling up and away
+		int y = base.getY() + (int) ((1f - in) * RISE_PX) - (int) (out * RISE_PX);
+		int alpha = (int) (255 * Math.min(in, 1f - out));
+
+		graphics.setColor(new Color(0, 0, 0, alpha));
+		graphics.drawString(death.text, x + 1, y + 1);
+		graphics.setColor(new Color(LOSS_RED.getRed(), LOSS_RED.getGreen(), LOSS_RED.getBlue(), alpha));
+		graphics.drawString(death.text, x, y);
 	}
 }

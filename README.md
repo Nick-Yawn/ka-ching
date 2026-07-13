@@ -25,6 +25,9 @@ Trident casts? Cannonballs? *ka-ching. ka-ching. ka-ching.*
 - **Food & potions** — Want to see how much your dinner costs? Every bite of food and every dose of potion now shows a price!
 - **Bones** — burying them straight into the dirt rings at the full GE price. Altar
   offerings and other methods stay silent.
+- **Deaths** — three seconds after you die, the GE value of everything you lost rolls
+  in overhead in red, hangs there for a minute, then rolls away. Items kept on death
+  don't count, and safe deaths (LMS, Inferno) stay silent.
 
 ## How it works
 
@@ -66,7 +69,8 @@ and it's remembered. If you unload and switch dart types, Check again.
 
 ## Config
 
-- Independent toggles: spells, ranged ammo, charged weapons, cannon, food/potions/bones
+- Independent toggles: spells, ranged ammo, charged weapons, cannon, food/potions/bones,
+  death losses
 - Ava's device override for blowpipe dart math
 - Coin jingle on/off and volume
 - Minimum gp value to trigger (mute the 15 gp Wind Strikes, keep the barrages)
@@ -80,7 +84,10 @@ and it's remembered. If you unload and switch dart types, Check again.
   may be forgiven as a drop. It's a meme plugin, not an accountant.
 - Blowpipe/charged-weapon animation IDs can change with game updates; if a weapon
   goes silent after an update, the table needs a refresh.
-- Deaths, trades, banking, GE, and shops are filtered out and won't ka-ching.
+- Trades, banking, GE, and shops are filtered out and won't ka-ching; regular per-item
+  tracking also pauses around a death so the loss isn't double-billed.
+- The death loss is whatever's missing when you respawn: items sent to a gravestone
+  count as lost even though you can buy them back.
 
 ## Running
 
