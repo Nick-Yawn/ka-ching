@@ -37,10 +37,17 @@ public class KaChingOverlay extends Overlay
 	// configured hold, then rolls away upward over 3s, fading symmetrically at
 	// both ends
 	private static final int DEATH_SCROLL_MS = 3000;
-	// World-space height above the player that anchors the resting loss clear of the
-	// head. Projected every frame, so the drop stays fixed relative to the character
-	// as the camera moves (vs the gold drops' +40, which sits right at head height).
-	private static final int DEATH_HEAD_OFFSET = 120;
+	// Cap on how much painted time a single frame can add, so a rendering gap (menu
+	// held open, tabbed out, region load) can't jump the animation forward — normal
+	// frames fall well under this and pass through as near real time.
+	private static final int DEATH_MAX_FRAME_STEP_MS = 250;
+	// Fixed world-space height above the player's feet where the loss rests. A constant
+	// rather than logicalHeight + margin (as the gold drops use) so it lands at the same
+	// spot for a real death — shown on the respawn tick, when the live pose height is
+	// briefly off and dragged the anchor down over the head — and for the ::kcdeath dev
+	// command fired while standing (full height, which sat too high). Re-projected every
+	// frame, so it stays anchored above the character as the camera moves.
+	private static final int DEATH_LOSS_HEIGHT = 240;
 
 	private final Client client;
 	private final List<Drop> drops = new ArrayList<>();
@@ -68,6 +75,13 @@ public class KaChingOverlay extends Overlay
 	{
 		final Color color;
 		final int holdMs;
+		// The animation runs on painted time, not wall-clock: shownMs only advances
+		// on frames where the loss is actually drawn, so a right-click menu (or a
+		// region load) pauses it and it resumes where it left off instead of
+		// expiring unseen. lastFrameMs is the previous frame's clock, -1 before the
+		// first frame.
+		long shownMs;
+		long lastFrameMs = -1;
 
 		DeathDrop(String text, int zOffset, Color color, int holdMs)
 		{
@@ -101,9 +115,10 @@ public class KaChingOverlay extends Overlay
 	/** A new death replaces any loss still hanging from a previous one. */
 	void showDeathLoss(long value, Color color, int holdMs)
 	{
-		Player player = client.getLocalPlayer();
-		int zOffset = (player != null ? player.getLogicalHeight() : 220) + DEATH_HEAD_OFFSET;
-		deathDrop = new DeathDrop("-" + QuantityFormatter.formatNumber(value) + " gp", zOffset, color, holdMs);
+		// Fixed height (DEATH_LOSS_HEIGHT): independent of the live pose, so a real death
+		// and the ::kcdeath dev command anchor the loss at the same spot.
+		deathDrop = new DeathDrop("-" + QuantityFormatter.formatNumber(value) + " gp",
+			DEATH_LOSS_HEIGHT, color, holdMs);
 	}
 
 	void clear()
@@ -121,7 +136,10 @@ public class KaChingOverlay extends Overlay
 		Player player = client.getLocalPlayer();
 		if (player == null)
 		{
-			clear();
+			// A region load or teleport briefly nulls the local player: skip the
+			// frame but keep any pending loss, so it resumes when the player is back
+			// (the painted-time clock is frozen meanwhile). A real logout/hop clears
+			// it from the plugin's game-state handler instead.
 			return null;
 		}
 
@@ -171,16 +189,27 @@ public class KaChingOverlay extends Overlay
 		{
 			return;
 		}
-		long elapsed = now - death.startMs;
+		// Advance the animation clock only on frames the loss is actually shown. A
+		// menu (or a null-player gap) freezes it here, so it never drains unseen; the
+		// per-frame step is clamped so resuming after a long gap can't skip ahead.
+		boolean menuOpen = client.isMenuOpen();
+		long step = death.lastFrameMs < 0 ? 0 : now - death.lastFrameMs;
+		death.lastFrameMs = now;
+		if (!menuOpen)
+		{
+			death.shownMs += Math.min(step, DEATH_MAX_FRAME_STEP_MS);
+		}
+
+		long elapsed = death.shownMs;
 		if (elapsed >= (long) DEATH_SCROLL_MS + death.holdMs + DEATH_SCROLL_MS)
 		{
 			deathDrop = null;
 			return;
 		}
 
-		if (client.isMenuOpen())
+		if (menuOpen)
 		{
-			return; // keep the loss pending, but don't paint over an open menu
+			return; // don't paint over an open menu; the clock above stays frozen
 		}
 
 		// in/out each ramp 0->1 across their own 3s scroll window

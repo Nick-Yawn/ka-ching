@@ -294,6 +294,7 @@ public class KaChingPlugin extends Plugin
 		{
 			case LOGIN_SCREEN:
 			case HOPPING:
+				overlay.clear();
 				reset();
 				break;
 			case LOADING:
