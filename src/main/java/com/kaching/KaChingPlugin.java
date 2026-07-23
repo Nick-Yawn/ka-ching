@@ -35,8 +35,11 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.events.RuneScapeProfileChanged;
 import net.runelite.http.api.item.ItemPrice;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
@@ -67,6 +70,9 @@ public class KaChingPlugin extends Plugin
 	private static final int MIN_RECHARGE_CHARGES = 5;
 	// An Eat/Drink click should consume its item within this many ticks
 	private static final int CONSUME_GRACE_TICKS = 2;
+	// Persisting the total fires a client-wide ConfigChanged, so writes are
+	// batched: at most one per interval, plus logout/hop/shutdown flushes
+	private static final int TOTAL_FLUSH_TICKS = 5;
 
 	// "Prayer potion(3)" -> a sip costs a third of the (3) price
 	private static final Pattern DOSE_SUFFIX = Pattern.compile("\\((\\d)\\)$");
@@ -170,10 +176,16 @@ public class KaChingPlugin extends Plugin
 	private KaChingOverlay overlay;
 
 	@Inject
+	private KaChingTotalOverlay totalOverlay;
+
+	@Inject
 	private KaChingConfig config;
 
 	@Inject
 	private ConfigManager configManager;
+
+	@Inject
+	private ClientThread clientThread;
 
 	private Map<Integer, Integer> prevInv = new HashMap<>();
 	private Map<Integer, Integer> prevPouch = new HashMap<>();
@@ -192,6 +204,13 @@ public class KaChingPlugin extends Plugin
 	private int prevCannonAmmo = -1;
 	// deliberately survives reset(): the cannon and its load outlive hops/logouts
 	private int cannonBallItemId = ItemID.MCANNONBALL;
+	// Running tally of everything billed, persisted per RS account. Survives
+	// reset() like the cannon state; only the user clears it. All mutations
+	// happen on the client thread (the config-panel clear hops over via
+	// clientThread); volatile covers the plugin-startup load from the EDT.
+	private volatile long totalBurned;
+	private boolean totalDirty;
+	private int lastTotalFlushTick = -1;
 	private int dartItemId = -1;
 	private boolean dartHintShown;
 	private boolean dealtDamageThisTick;
@@ -232,7 +251,12 @@ public class KaChingPlugin extends Plugin
 	protected void startUp()
 	{
 		overlayManager.add(overlay);
+		overlayManager.add(totalOverlay);
 		reset();
+		loadTotal();
+		// A stale "Clear total burned" tick (e.g. ticked while the plugin was
+		// disabled) must not fire a clear whose confirmation is long gone
+		configManager.unsetConfiguration(KaChingConfig.GROUP, "clearTotal");
 		dartHintShown = false;
 		String dart = configManager.getConfiguration(KaChingConfig.GROUP, "dartType");
 		dartItemId = dart != null && DART_IDS.containsKey(dart) ? DART_IDS.get(dart) : -1;
@@ -241,9 +265,81 @@ public class KaChingPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		flushTotal();
 		overlayManager.remove(overlay);
+		overlayManager.remove(totalOverlay);
 		overlay.clear();
 		reset();
+	}
+
+	@Subscribe
+	public void onRuneScapeProfileChanged(RuneScapeProfileChanged event)
+	{
+		loadTotal();
+	}
+
+	// The "Clear total burned" config item is a button in checkbox clothing:
+	// ticking it (past its confirmation warning) clears the total, then the
+	// tick is undone so it's ready to press again
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event)
+	{
+		if (!KaChingConfig.GROUP.equals(event.getGroup()) || !"clearTotal".equals(event.getKey())
+			|| !Boolean.parseBoolean(event.getNewValue()))
+		{
+			return;
+		}
+		configManager.unsetConfiguration(KaChingConfig.GROUP, "clearTotal");
+		// The panel fires this on the EDT; hop to the client thread so the
+		// clear can't race a tick's accumulation. The total is per-account, so
+		// it needs an active RS profile to address — but not GameState
+		// LOGGED_IN specifically, which blinks off during loading screens,
+		// hops and connection loss while the account remains the same.
+		clientThread.invokeLater(() ->
+		{
+			if (configManager.getRSProfileKey() != null)
+			{
+				clearTotal();
+			}
+		});
+	}
+
+	private void loadTotal()
+	{
+		String saved = configManager.getRSProfileConfiguration(KaChingConfig.GROUP, "totalBurned");
+		try
+		{
+			totalBurned = saved != null ? Long.parseLong(saved) : 0;
+		}
+		catch (NumberFormatException e)
+		{
+			totalBurned = 0;
+		}
+		// Any unflushed accumulation belonged to the previous profile; writing
+		// it now would bill the wrong account
+		totalDirty = false;
+	}
+
+	private void flushTotal()
+	{
+		if (totalDirty && configManager.getRSProfileKey() != null)
+		{
+			configManager.setRSProfileConfiguration(KaChingConfig.GROUP, "totalBurned", totalBurned);
+			totalDirty = false;
+			lastTotalFlushTick = client.getTickCount();
+		}
+	}
+
+	long getTotalBurned()
+	{
+		return totalBurned;
+	}
+
+	void clearTotal()
+	{
+		totalBurned = 0;
+		totalDirty = true;
+		flushTotal();
 	}
 
 	private void reset()
@@ -273,6 +369,7 @@ public class KaChingPlugin extends Plugin
 		{
 			case LOGIN_SCREEN:
 			case HOPPING:
+				flushTotal();
 				reset();
 				break;
 			case LOADING:
@@ -437,9 +534,13 @@ public class KaChingPlugin extends Plugin
 		value += cannonValue(curInv);
 		value += consumablesValue(curInv);
 
-		if (value >= Math.max(1, config.minValue()))
+		if (value > 0)
 		{
 			kaching(value);
+		}
+		if (totalDirty && tick - lastTotalFlushTick >= TOTAL_FLUSH_TICKS)
+		{
+			flushTotal();
 		}
 
 		prevInv = curInv;
@@ -934,6 +1035,14 @@ public class KaChingPlugin extends Plugin
 
 	private void kaching(long value)
 	{
+		totalBurned += value;
+		totalDirty = true;
+		// The minimum-value gate mutes the pop and jingle, not the accounting:
+		// the total keeps counting losses too small to ring
+		if (value < Math.max(1, config.minValue()))
+		{
+			return;
+		}
 		overlay.add(value);
 		if (config.playSound() && config.soundVolume() > 0)
 		{

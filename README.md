@@ -54,6 +54,15 @@ Trident casts? Cannonballs? *ka-ching. ka-ching. ka-ching.*
   never credited — this is a negative-kaching plugin.
 - Cannon ammo is server-synced (varp 3); each decrease is a shot, ground truth.
 
+## Running total
+
+A movable on-screen panel tallies everything the plugin bills — your lifetime burn,
+kept per account and surviving client restarts. To start over, shift-right-click
+the panel → **Clear**, or tick **Clear total burned** in the plugin settings — it
+asks for confirmation and acts as a button, so the tick doesn't stick (the panel
+may keep showing it ticked until reopened). The minimum-value setting only mutes
+pops; muted losses still count toward the total.
+
 ## Blowpipe pricing
 
 Blowpipe costs are expected values: ⅔ scale per shot (1-in-3 save) plus darts lost at
@@ -67,6 +76,7 @@ and it's remembered. If you unload and switch dart types, Check again.
 ## Config
 
 - Independent toggles: spells, ranged ammo, charged weapons, cannon, food/potions/bones
+- Running total overlay on/off
 - Ava's device override for blowpipe dart math
 - Coin jingle on/off and volume
 - Minimum gp value to trigger (mute the 15 gp Wind Strikes, keep the barrages)

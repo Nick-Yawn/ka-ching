@@ -17,9 +17,11 @@ import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
+import net.runelite.api.SoundEffectID;
 import net.runelite.api.TileItem;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.ItemSpawned;
@@ -29,7 +31,9 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.http.api.item.ItemPrice;
@@ -39,8 +43,13 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
+import static org.junit.Assert.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -91,9 +100,13 @@ public class KaChingAccountingTest
 	@Mock
 	private KaChingOverlay overlay;
 	@Mock
+	private KaChingTotalOverlay totalOverlay;
+	@Mock
 	private KaChingConfig config;
 	@Mock
 	private ConfigManager configManager;
+	@Mock
+	private ClientThread clientThread;
 	@Mock
 	private Player localPlayer;
 	@Mock
@@ -115,8 +128,15 @@ public class KaChingAccountingTest
 		inject("itemManager", itemManager);
 		inject("overlayManager", overlayManager);
 		inject("overlay", overlay);
+		inject("totalOverlay", totalOverlay);
 		inject("config", config);
 		inject("configManager", configManager);
+		inject("clientThread", clientThread);
+
+		// The harness is single-threaded: hops to the client thread run inline
+		doAnswer(inv -> { inv.<Runnable>getArgument(0).run(); return null; })
+			.when(clientThread).invokeLater(any(Runnable.class));
+		when(configManager.getRSProfileKey()).thenReturn("rsprofile.test");
 
 		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
 		when(client.getTickCount()).thenAnswer(i -> tick);
@@ -151,6 +171,9 @@ public class KaChingAccountingTest
 
 		plugin.startUp();
 		tick(); // first tick only syncs snapshots
+		// startUp's own configManager traffic (stale-tick sanitize, total load)
+		// shouldn't count against per-test verifies
+		clearInvocations(configManager);
 	}
 
 	// ---- spells ----
@@ -593,7 +616,202 @@ public class KaChingAccountingTest
 		verify(overlay, never()).add(anyLong());
 	}
 
+	// ---- running total ----
+
+	@Test
+	public void totalAccumulatesAcrossRings()
+	{
+		setInventory(new Item(ItemID.DEATHRUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 96));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 90));
+		tick();
+		assertEquals(10L * DEATH_PRICE, plugin.getTotalBurned());
+		ticks(5); // flush interval elapses
+		verify(configManager).setRSProfileConfiguration(KaChingConfig.GROUP, "totalBurned", 10L * DEATH_PRICE);
+	}
+
+	@Test
+	public void totalPersistenceIsDebounced()
+	{
+		setInventory(new Item(ItemID.DEATHRUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 96));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 90));
+		tick();
+		// Consecutive-tick rings share one write: the first flushed, the second is pending
+		verify(configManager, times(1)).setRSProfileConfiguration(eq(KaChingConfig.GROUP), eq("totalBurned"), anyLong());
+		ticks(5);
+		verify(configManager).setRSProfileConfiguration(KaChingConfig.GROUP, "totalBurned", 10L * DEATH_PRICE);
+	}
+
+	@Test
+	public void totalFlushesOnLogoutAndHop()
+	{
+		setInventory(new Item(ItemID.DEATHRUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 96));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 90));
+		tick(); // second ring still pending inside the flush interval
+		GameStateChanged hop = new GameStateChanged();
+		hop.setGameState(GameState.HOPPING);
+		plugin.onGameStateChanged(hop);
+		verify(configManager).setRSProfileConfiguration(KaChingConfig.GROUP, "totalBurned", 10L * DEATH_PRICE);
+	}
+
+	@Test
+	public void totalKeepsCountingBelowMinimumValue()
+	{
+		when(config.minValue()).thenReturn(1_000);
+		setInventory(new Item(ItemID.FIRERUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.FIRERUNE, 90));
+		tick();
+		verify(overlay, never()).add(anyLong());
+		assertEquals(10L * FIRE_PRICE, plugin.getTotalBurned());
+	}
+
+	@Test
+	public void clearTotalZeroesAndPersists()
+	{
+		setInventory(new Item(ItemID.DEATHRUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 96));
+		tick();
+		plugin.clearTotal();
+		assertEquals(0L, plugin.getTotalBurned());
+		verify(configManager).setRSProfileConfiguration(KaChingConfig.GROUP, "totalBurned", 0L);
+	}
+
+	@Test
+	public void clearTotalConfigTickClearsAndUnticksItself()
+	{
+		setInventory(new Item(ItemID.DEATHRUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 96));
+		tick();
+		plugin.onConfigChanged(clearTotalTicked());
+		assertEquals(0L, plugin.getTotalBurned());
+		verify(configManager).unsetConfiguration(KaChingConfig.GROUP, "clearTotal");
+		verify(configManager).setRSProfileConfiguration(KaChingConfig.GROUP, "totalBurned", 0L);
+	}
+
+	@Test
+	public void clearTotalConfigTickIsIgnoredWithoutActiveProfile()
+	{
+		setInventory(new Item(ItemID.DEATHRUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 96));
+		tick();
+		when(client.getGameState()).thenReturn(GameState.LOGIN_SCREEN);
+		when(configManager.getRSProfileKey()).thenReturn(null);
+		plugin.onConfigChanged(clearTotalTicked());
+		assertEquals(4L * DEATH_PRICE, plugin.getTotalBurned());
+		verify(configManager).unsetConfiguration(KaChingConfig.GROUP, "clearTotal");
+	}
+
+	@Test
+	public void clearTotalConfigTickWorksDuringLoadingScreens()
+	{
+		setInventory(new Item(ItemID.DEATHRUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 96));
+		tick();
+		// The account is still active during LOADING/HOPPING/CONNECTION_LOST;
+		// only a missing RS profile blocks the clear
+		when(client.getGameState()).thenReturn(GameState.LOADING);
+		plugin.onConfigChanged(clearTotalTicked());
+		assertEquals(0L, plugin.getTotalBurned());
+		verify(configManager).setRSProfileConfiguration(KaChingConfig.GROUP, "totalBurned", 0L);
+	}
+
+	@Test
+	public void clearTotalEchoEventsDoNotReclearOrLoop()
+	{
+		setInventory(new Item(ItemID.DEATHRUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 96));
+		tick();
+		// The real ConfigManager synchronously re-posts ConfigChanged (newValue
+		// null) from unsetConfiguration; reproduce that echo through the mock
+		doAnswer(inv -> { plugin.onConfigChanged(clearTotalEvent(null)); return null; })
+			.when(configManager).unsetConfiguration(KaChingConfig.GROUP, "clearTotal");
+		plugin.onConfigChanged(clearTotalTicked());
+		assertEquals(0L, plugin.getTotalBurned());
+		setInventory(new Item(ItemID.DEATHRUNE, 92));
+		tick();
+		// A "false" write (manual untick past the warning dialog) must not clear
+		plugin.onConfigChanged(clearTotalEvent("false"));
+		assertEquals(4L * DEATH_PRICE, plugin.getTotalBurned());
+	}
+
+	@Test
+	public void totalReloadsWhenProfileChanges()
+	{
+		when(configManager.getRSProfileConfiguration(KaChingConfig.GROUP, "totalBurned")).thenReturn("12345");
+		plugin.onRuneScapeProfileChanged(null);
+		assertEquals(12_345L, plugin.getTotalBurned());
+	}
+
+	@Test
+	public void corruptSavedTotalFallsBackToZero()
+	{
+		when(configManager.getRSProfileConfiguration(KaChingConfig.GROUP, "totalBurned")).thenReturn("not a number");
+		plugin.onRuneScapeProfileChanged(null);
+		assertEquals(0L, plugin.getTotalBurned());
+	}
+
+	@Test
+	public void totalResetsWhenProfileHasNoSavedValue()
+	{
+		setInventory(new Item(ItemID.DEATHRUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.DEATHRUNE, 96));
+		tick();
+		// getRSProfileConfiguration is unstubbed (null): a fresh profile starts at 0
+		plugin.onRuneScapeProfileChanged(null);
+		assertEquals(0L, plugin.getTotalBurned());
+	}
+
+	@Test
+	public void jingleIsMutedBelowMinimumValueButTotalStillCounts()
+	{
+		when(config.playSound()).thenReturn(true);
+		when(config.soundVolume()).thenReturn(100);
+		when(config.minValue()).thenReturn(1_000);
+		setInventory(new Item(ItemID.FIRERUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.FIRERUNE, 90));
+		tick();
+		verify(client, never()).playSoundEffect(anyInt(), anyInt());
+		verify(overlay, never()).add(anyLong());
+		setInventory(new Item(ItemID.FIRERUNE, 90), new Item(ItemID.DEATHRUNE, 100));
+		tick();
+		setInventory(new Item(ItemID.FIRERUNE, 90), new Item(ItemID.DEATHRUNE, 90));
+		tick();
+		verify(client).playSoundEffect(SoundEffectID.GE_COIN_TINKLE, 100);
+		verify(overlay).add(10L * DEATH_PRICE);
+		assertEquals(10L * FIRE_PRICE + 10L * DEATH_PRICE, plugin.getTotalBurned());
+	}
+
 	// ---- harness ----
+
+	private ConfigChanged clearTotalTicked()
+	{
+		return clearTotalEvent("true");
+	}
+
+	private ConfigChanged clearTotalEvent(String newValue)
+	{
+		ConfigChanged event = new ConfigChanged();
+		event.setGroup(KaChingConfig.GROUP);
+		event.setKey("clearTotal");
+		event.setNewValue(newValue);
+		return event;
+	}
 
 	private void inject(String field, Object value) throws Exception
 	{

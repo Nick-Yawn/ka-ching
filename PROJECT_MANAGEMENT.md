@@ -18,7 +18,6 @@ Shipped v1. Core accounting features are implemented and covered by a test suite
 - [ ] _(add current tasks here)_
 
 ### Next / Backlog
-- [ ] Session totals — clearable/toggleable running tally (top launch-day request on Reddit)
 - [ ] Overlay customization: font color, size, placement (harmless, commonly requested)
 - [ ] Wilderness weapons — revenant ether weapons (Craw's/Webweaver, Viggora's/Ursine,
       Thammaron's/Accursed): 1 revenant ether per attack, same detection as other charged weapons
@@ -32,7 +31,9 @@ Shipped v1. Core accounting features are implemented and covered by a test suite
 - [ ] Expand test coverage for edge cases (Ava's recovery tiers, recharge detection)
 
 ### Later / Ideas
-- [ ] Loss on death — bill what you just lost (fees, unprotected items). Maximum spirit-of-the-plugin
+- [ ] Loss on death — bill what you just lost (fees, unprotected items). Maximum spirit-of-the-plugin.
+      In progress on `origin/death-value`; at merge, decide whether death losses feed the
+      running total (they do automatically if they ring through `kaching()`)
 - [ ] Skilling losses (was gated until after v1) — fletching/crafting/smithing actions where
       outputs are worth less than inputs ring the difference. Sketch: on ticks where inventory
       items both leave and arrive, bill max(0, value in − value out); bank/trade suppression
@@ -49,6 +50,8 @@ Shipped v1. Core accounting features are implemented and covered by a test suite
 - [ ] Bone Offering option
 
 ## Done
+- [x] Running total — clearable on-screen tally of everything billed, persisted per
+      RS account across restarts (top launch-day request on Reddit)
 - [x] v1 release: overhead GE pricing for spells, ammo, charged weapons, cannon
 - [x] Food & potion per-dose pricing (pro-rated multi-bite foods, dose step-down)
 - [x] Buried-bones pricing
@@ -68,6 +71,7 @@ Intentional design decisions — not bugs or TODOs:
 | [KaChingPlugin.java](src/main/java/com/kaching/KaChingPlugin.java) | Main plugin: event handling, diffing, accounting |
 | [KaChingConfig.java](src/main/java/com/kaching/KaChingConfig.java) | User-facing config toggles |
 | [KaChingOverlay.java](src/main/java/com/kaching/KaChingOverlay.java) | Floating overhead price text rendering |
+| [KaChingTotalOverlay.java](src/main/java/com/kaching/KaChingTotalOverlay.java) | Movable running-total panel (shift-right-click → Clear) |
 | [ChargedWeapon.java](src/main/java/com/kaching/ChargedWeapon.java) | Per-charge recipe definitions for charged weapons |
 | [KaChingAccountingTest.java](src/test/java/com/kaching/KaChingAccountingTest.java) | Accounting logic tests |
 | [KaChingPluginTest.java](src/test/java/com/kaching/KaChingPluginTest.java) | Dev launcher (sideloads the plugin into a local client; not a test) |

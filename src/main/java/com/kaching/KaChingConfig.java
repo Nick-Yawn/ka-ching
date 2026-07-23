@@ -110,6 +110,29 @@ public interface KaChingConfig extends Config
 		return 1;
 	}
 
+	@ConfigItem(
+		keyName = "showTotal",
+		name = "Show total burned",
+		description = "Movable on-screen tally of all gp burned on this account; right-click it to clear. Counts every tracked loss, even ones muted by Minimum value, and survives client restarts",
+		position = 9
+	)
+	default boolean showTotal()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "clearTotal",
+		name = "Clear total burned",
+		description = "Tick to zero the running total for this account",
+		warning = "Are you sure you want to clear the running total for this account? This can't be undone.",
+		position = 10
+	)
+	default boolean clearTotal()
+	{
+		return false;
+	}
+
 	enum AvasDevice
 	{
 		AUTO_DETECT(-1),
