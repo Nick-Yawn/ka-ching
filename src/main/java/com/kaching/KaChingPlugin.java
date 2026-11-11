@@ -477,7 +477,7 @@ public class KaChingPlugin extends Plugin
 			int consumed = entry.getValue() - takeFromGround(entry.getKey(), entry.getValue());
 			if (consumed > 0)
 			{
-				value += (long) itemManager.getItemPrice(entry.getKey()) * consumed;
+				value += itemManager.getItemPrice(entry.getKey()) * consumed;
 			}
 		}
 		return value;
@@ -597,7 +597,7 @@ public class KaChingPlugin extends Plugin
 			}
 			else if (client.getTickCount() >= pending.expiryTick)
 			{
-				value += (long) itemManager.getItemPrice(pending.itemId) * pending.quantity;
+				value += itemManager.getItemPrice(pending.itemId) * pending.quantity;
 				it.remove();
 			}
 		}
@@ -807,7 +807,7 @@ public class KaChingPlugin extends Plugin
 	 */
 	private long consumeCost(int itemId, Map<Integer, Integer> increases)
 	{
-		int price = itemManager.getItemPrice(itemId);
+		long price = itemManager.getItemPrice(itemId);
 		String name = itemManager.getItemComposition(itemId).getName();
 		Matcher doseMatcher = DOSE_SUFFIX.matcher(name);
 		if (!doseMatcher.find())
@@ -816,7 +816,7 @@ public class KaChingPlugin extends Plugin
 		}
 		int doses = Math.max(1, Integer.parseInt(doseMatcher.group(1)));
 
-		int residuePrice = -1;
+		long residuePrice = -1;
 		if (doses == 1)
 		{
 			// Credit the vial only if one actually appeared — with vial smashing
@@ -853,7 +853,7 @@ public class KaChingPlugin extends Plugin
 	 * Container residues (jugs, bowls, pie dishes, beer glasses) are
 	 * deliberately never credited: this is a negative-kaching plugin.
 	 */
-	private long foodBiteCost(int price, String name, Map<Integer, Integer> increases)
+	private long foodBiteCost(long price, String name, Map<Integer, Integer> increases)
 	{
 		// Eating a whole item that left a partial behind
 		for (int increasedId : increases.keySet())
@@ -863,7 +863,7 @@ public class KaChingPlugin extends Plugin
 			{
 				if (residueName.equalsIgnoreCase(prefix.getKey() + name))
 				{
-					int residuePrice = itemManager.getItemPrice(increasedId);
+					long residuePrice = itemManager.getItemPrice(increasedId);
 					if (residuePrice > 0)
 					{
 						return Math.max(0, price - residuePrice);
@@ -880,7 +880,7 @@ public class KaChingPlugin extends Plugin
 				String prefixText = prefix.getKey();
 				if (name.regionMatches(true, 0, prefixText, 0, prefixText.length()))
 				{
-					int basePrice = exactPriceByName(name.substring(prefixText.length()));
+					long basePrice = exactPriceByName(name.substring(prefixText.length()));
 					if (basePrice > 0)
 					{
 						return Math.round(basePrice * prefix.getValue());
@@ -890,7 +890,7 @@ public class KaChingPlugin extends Plugin
 			// "Chocolate slice" -> a third of a chocolate cake (irregular name)
 			if (name.toLowerCase().endsWith(" slice"))
 			{
-				int basePrice = exactPriceByName(name.substring(0, name.length() - " slice".length()) + " cake");
+				long basePrice = exactPriceByName(name.substring(0, name.length() - " slice".length()) + " cake");
 				if (basePrice > 0)
 				{
 					return Math.round(basePrice / 3.0);
@@ -900,7 +900,7 @@ public class KaChingPlugin extends Plugin
 		return price;
 	}
 
-	private int exactPriceByName(String name)
+	private long exactPriceByName(String name)
 	{
 		for (ItemPrice result : itemManager.search(name))
 		{
@@ -926,7 +926,7 @@ public class KaChingPlugin extends Plugin
 		return increases;
 	}
 
-	private int priceOf(int itemId)
+	private long priceOf(int itemId)
 	{
 		// Coins aren't GE-tradeable; 1 gp is 1 gp
 		return itemId == ItemID.COINS ? 1 : itemManager.getItemPrice(itemId);
