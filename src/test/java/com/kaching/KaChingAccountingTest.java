@@ -602,7 +602,7 @@ public class KaChingAccountingTest
 		f.set(plugin, value);
 	}
 
-	private void price(int itemId, int price)
+	private void price(int itemId, long price)
 	{
 		when(itemManager.getItemPrice(itemId)).thenReturn(price);
 	}
