@@ -4,6 +4,12 @@ on:
   push:
     branches: [ main ]
   pull_request:
+  schedule:
+    # Thursdays 12:23 UTC, the day after RuneLite's usual Wednesday release.
+    # build.gradle tracks latest.release, so this is what notices a client API
+    # change breaking the build while nobody is pushing.
+    - cron: '23 12 * * 4'
+  workflow_dispatch:
 
 jobs:
   test:
